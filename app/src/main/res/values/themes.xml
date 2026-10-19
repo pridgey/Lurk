@@ -1,0 +1,4 @@
+<resources>
+    <!-- The WebViews read this theme to decide whether pages see prefers-color-scheme: dark. -->
+    <style name="Theme.Lurk" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

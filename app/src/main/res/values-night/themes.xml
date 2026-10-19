@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.Lurk" parent="android:Theme.Material.NoActionBar" />
+</resources>
