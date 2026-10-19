@@ -62,3 +62,10 @@ The engine only requests what you're looking at (a page of 25 posts as you scrol
 Every push to `main` builds the app with GitHub Actions (`.github/workflows/build-apk.yml`).
 The newest APK is attached to the **latest** release: open the repo's **Releases** page and download `Lurk-<n>.apk`.
 Each run's APK is also kept as an artifact on its **Actions** run page. You can trigger a build manually from **Actions → Build APK → Run workflow**.
+
+### Signing
+
+CI signs the APK with a permanent release key stored in the repo's Actions secrets
+(`LURK_KEYSTORE_BASE64`, `LURK_KEYSTORE_PASSWORD`, `LURK_KEY_ALIAS`, `LURK_KEY_PASSWORD`), so each new build installs as an update over the last.
+Keep an offline backup of the keystore: if it's lost, future builds can't update the installed app.
+Local builds without these variables fall back to the debug key.

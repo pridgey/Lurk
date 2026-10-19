@@ -23,8 +23,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Decode signing key
+        env:
+          LURK_KEYSTORE_BASE64: ${{ secrets.LURK_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$LURK_KEYSTORE_BASE64" || { echo "::error::LURK_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          echo "$LURK_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/lurk-release.jks"
+
       - name: Build release APK
+        env:
+          LURK_KEYSTORE_PATH: ${{ runner.temp }}/lurk-release.jks
+          LURK_KEYSTORE_PASSWORD: ${{ secrets.LURK_KEYSTORE_PASSWORD }}
+          LURK_KEY_ALIAS: ${{ secrets.LURK_KEY_ALIAS }}
+          LURK_KEY_PASSWORD: ${{ secrets.LURK_KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
+
+      - name: Verify signature
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | tee sig.txt
+          grep -q "CN=Lurk" sig.txt || { echo "::error::APK not signed with the Lurk release key"; exit 1; }
 
       - name: Rename APK
         run: |

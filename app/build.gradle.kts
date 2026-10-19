@@ -16,11 +16,25 @@ android {
         versionName = "0.1"
     }
 
+    // Permanent release key, supplied by CI (see .github/workflows/build-apk.yml).
+    val releaseKeystore = System.getenv("LURK_KEYSTORE_PATH")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("LURK_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("LURK_KEY_ALIAS")
+                keyPassword = System.getenv("LURK_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Personal sideload build: sign release with the debug key so it installs without setup.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without the release key (e.g. a local build), fall back to the debug key so it still installs.
+            signingConfig = if (releaseKeystore != null) signingConfigs.getByName("release")
+                else signingConfigs.getByName("debug")
         }
     }
 
