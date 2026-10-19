@@ -101,10 +101,13 @@ fun LurkApp(store: AccountStore) {
     val activeId = store.activeId
     key(activeId) {
         val session = remember {
-            AccountSession(context, store, activeId, scripts, onMessage, onExternal)
+            AccountSession(
+                context, store, activeId, scripts, onMessage, onExternal,
+                signInFirst = store.consumePendingLogin(activeId),
+            )
         }
         DisposableEffect(session) {
-            session.start(signInFirst = store.consumePendingLogin(activeId))
+            session.start()
             onDispose { session.destroy() }
         }
         AccountScreen(store, session, snackbar)

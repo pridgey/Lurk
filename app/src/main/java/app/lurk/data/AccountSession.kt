@@ -30,6 +30,8 @@ class AccountSession(
     scripts: Scripts,
     private val onMessage: (String) -> Unit,
     private val onExternal: (Uri) -> Unit,
+    /** Open on the sign-in page (a just-added account) instead of the front page. */
+    signInFirst: Boolean,
 ) {
     private val scope = MainScope()
     private val profile = store.profileFor(accountId)
@@ -43,9 +45,11 @@ class AccountSession(
         onPageUser = { user -> scope.launch { onPageUser(user) } },
     )
 
-    /** The back stack; the last entry is on screen. */
-    val stack = mutableStateListOf<Screen>()
+    /** The back stack; the last entry is on screen. Never empty: the UI reads it on first draw. */
+    val stack = mutableStateListOf<Screen>(if (signInFirst) WebScreen(Links.LOGIN) else feed(null))
     val current: Screen get() = stack.last()
+
+    private val syncOnStart = !signInFirst
 
     /** An image open in the full-screen viewer. */
     var viewingImage by mutableStateOf<String?>(null)
@@ -58,9 +62,8 @@ class AccountSession(
 
     val account: Account? get() = store.find(accountId)
 
-    fun start(signInFirst: Boolean) {
-        stack += if (signInFirst) WebScreen(Links.LOGIN) else feed(null)
-        if (!signInFirst) requestSync()
+    fun start() {
+        if (syncOnStart) requestSync()
     }
 
     // --- Navigation ---

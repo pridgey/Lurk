@@ -34,6 +34,9 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -54,4 +57,9 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Android's built-in org.json is a stub in local unit tests; use the real one.
     testImplementation("org.json:json:20240303")
+    // Launch smoke test: runs the real activity on the JVM.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
