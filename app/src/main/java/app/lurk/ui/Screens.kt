@@ -243,7 +243,13 @@ private fun CommentRow(
             )
         }
         Indented(comment.depth) {
-            Column(Modifier.padding(top = 6.dp, end = 8.dp, bottom = if (collapsed) 8.dp else 2.dp)) {
+            Column(
+                Modifier.padding(
+                    top = if (collapsed) 9.dp else 6.dp,
+                    end = 8.dp,
+                    bottom = if (collapsed) 11.dp else 2.dp,
+                ),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Avatar(comment.author, 22.dp, Modifier.clickable { onUser(comment.author) })
                     val authorColor = when (comment.distinguished) {
@@ -278,8 +284,9 @@ private fun CommentRow(
                     if (!collapsed) VoteControls(comment.name, comment.score, comment.likes, actions, comment.scoreHidden)
                 }
                 if (!collapsed) {
-                    HtmlText(
+                    CommentBody(
                         comment.bodyHtml,
+                        comment.gifs,
                         onLink = onLink,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(start = 30.dp, bottom = 10.dp),

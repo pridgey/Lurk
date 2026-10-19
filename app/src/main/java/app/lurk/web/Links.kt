@@ -137,7 +137,7 @@ object Links {
         }
     }
 
-    private val imageHosts = setOf("i.redd.it", "preview.redd.it", "i.imgur.com")
+    private val imageHosts = setOf("i.redd.it", "preview.redd.it", "external-preview.redd.it", "i.imgur.com", "media.giphy.com")
     private val imageExtensions = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif")
 
     /** Direct links to an image file, which open in the image viewer. */

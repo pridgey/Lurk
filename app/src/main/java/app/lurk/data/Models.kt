@@ -76,6 +76,15 @@ sealed interface ThreadItem {
     val parentName: String
 }
 
+/**
+ * A GIF embedded in a comment. [id] is its media_metadata key: an upload's media id,
+ * or "giphy|<id>" / "giphy|<id>|downsized" for Giphy.
+ */
+data class InlineGif(val id: String, val url: String, val width: Int, val height: Int) {
+    /** What the body's link to this GIF contains: the bare upload or Giphy id. */
+    val token: String get() = if (id.startsWith("giphy|")) id.split('|')[1] else id
+}
+
 data class Comment(
     val name: String,
     val author: String,
@@ -92,6 +101,8 @@ data class Comment(
     /** "moderator", "admin" or null. */
     val distinguished: String?,
     val flair: String?,
+    /** Animated GIFs embedded in the body (Giphy or uploads), from media_metadata. */
+    val gifs: List<InlineGif> = emptyList(),
 ) : ThreadItem {
     override val key: String get() = name
 }
@@ -193,6 +204,7 @@ object Parse {
                 stickied = d.optBoolean("stickied"),
                 distinguished = d.str("distinguished"),
                 flair = d.str("author_flair_text"),
+                gifs = commentGifs(d),
             )
             "more" -> {
                 val ids = d.optJSONArray("children") ?: JSONArray()
@@ -325,6 +337,17 @@ object Parse {
         val mid = (0 until sizes.length()).map { sizes.getJSONObject(it) }
             .firstOrNull { it.optInt("x") >= 640 }
         return Picture(mid?.str("u") ?: full, full, s.optInt("x"), s.optInt("y"))
+    }
+
+    private fun commentGifs(d: JSONObject): List<InlineGif> {
+        val meta = d.optJSONObject("media_metadata") ?: return emptyList()
+        return meta.keys().asSequence().mapNotNull { key ->
+            val m = meta.optJSONObject(key) ?: return@mapNotNull null
+            if (m.optString("status") != "valid" || m.optString("e") != "AnimatedImage") return@mapNotNull null
+            val s = m.optJSONObject("s") ?: return@mapNotNull null
+            val gif = s.str("gif") ?: return@mapNotNull null
+            InlineGif(key, gif, s.optInt("x"), s.optInt("y"))
+        }.toList()
     }
 
     private fun linkThumbnail(d: JSONObject): String? =

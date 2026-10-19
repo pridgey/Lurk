@@ -162,4 +162,22 @@ class ParseTest {
         assertEquals(listOf("t1_d" to 2, "t1_f" to 3, "t1_e" to 2),
             items.map { (it as Comment).name to it.depth })
     }
+
+    @Test
+    fun commentKeepsAnimatedGifsOnly() {
+        val json = JSONObject("""{"kind":"t1","data":{"name":"t1_g","author":"a","body_html":"",
+            "parent_id":"t3_abc","created_utc":1,
+            "media_metadata":{
+              "giphy|AbC123|downsized":{"status":"valid","e":"AnimatedImage","ext":"https://giphy.com/gifs/AbC123",
+                "s":{"gif":"https://external-preview.redd.it/x.gif?s=1","mp4":"https://external-preview.redd.it/x.mp4","x":200,"y":100}},
+              "upl0ad":{"status":"valid","e":"AnimatedImage","s":{"gif":"https://i.redd.it/upl0ad.gif","x":10,"y":10}},
+              "still":{"status":"valid","e":"Image","s":{"u":"https://preview.redd.it/still.png","x":10,"y":10}},
+              "broken":{"status":"failed","e":"AnimatedImage"}}}}""")
+        val tree = JSONArray("[${listing("""{"kind":"t3","data":${postJson()}}""")}, ${listing(json.toString())}]")
+        val gifs = (Parse.thread(tree, "/r/pics/comments/abc/hello").items.single() as Comment).gifs.sortedBy { it.id }
+        assertEquals(listOf("giphy|AbC123|downsized", "upl0ad"), gifs.map { it.id })
+        assertEquals(listOf("AbC123", "upl0ad"), gifs.map { it.token })
+        assertEquals("https://external-preview.redd.it/x.gif?s=1", gifs[0].url)
+        assertEquals(200 to 100, gifs[0].width to gifs[0].height)
+    }
 }
