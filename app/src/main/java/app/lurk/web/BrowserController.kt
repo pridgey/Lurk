@@ -11,12 +11,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-/** The visible, skinned WebView the user reads Reddit in. */
+/**
+ * The visible, skinned WebView, used for pages without a native screen (sign-in,
+ * inbox, user pages, "View on web").
+ */
 class BrowserController(
     context: Context,
     profile: String?,
     private val scripts: Scripts,
     private val onExternal: (Uri) -> Unit,
+    /** Offered links the app can show natively; returns true if it took over. */
+    private val onNative: (Uri) -> Boolean,
     /** Called after each old Reddit page loads with the username the page shows (null = signed out). */
     private val onPageUser: (String?) -> Unit,
 ) {
@@ -29,11 +34,25 @@ class BrowserController(
     var canGoBack by mutableStateOf(false)
         private set
 
+    /** Set by [openFresh]: drop the history once the new page has loaded. */
+    private var clearHistory = false
+
     init {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!request.isForMainFrame) return false
-                return when (val decision = Links.decide(request.url)) {
+                val decision = Links.decide(request.url)
+                // Links the user (or a page script) follows to feeds and threads go native.
+                // Server redirects don't, so "View on web" stays on the web.
+                val target = when (decision) {
+                    is Links.Decision.Rewrite -> decision.uri
+                    Links.Decision.Stay -> request.url.takeIf { Links.isOldReddit(it.toString()) }
+                    else -> null
+                }
+                if (!request.isRedirect && target != null && Links.route(target) != null && onNative(target)) {
+                    return true
+                }
+                return when (decision) {
                     Links.Decision.Stay -> false
                     is Links.Decision.Rewrite -> {
                         view.loadUrl(decision.uri.toString())
@@ -48,6 +67,11 @@ class BrowserController(
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                if (clearHistory) {
+                    clearHistory = false
+                    view.clearHistory()
+                    canGoBack = false
+                }
                 if (!Links.isOldReddit(url)) return
                 // Fallback for WebViews without document-start scripts; a no-op otherwise.
                 view.evaluateJavascript(scripts.skin, null)
@@ -70,6 +94,13 @@ class BrowserController(
     }
 
     fun open(url: String) = webView.loadUrl(url)
+
+    /** Opens [url] as the start of a new history, so Back leaves the web view. */
+    fun openFresh(url: String) {
+        clearHistory = true
+        this.url = url
+        webView.loadUrl(url)
+    }
     fun reload() = webView.reload()
     fun goBack() {
         if (webView.canGoBack()) webView.goBack()

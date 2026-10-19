@@ -48,4 +48,10 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.browser:browser:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
+
+    testImplementation("junit:junit:4.13.2")
+    // Android's built-in org.json is a stub in local unit tests; use the real one.
+    testImplementation("org.json:json:20240303")
 }
