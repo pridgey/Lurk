@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -41,7 +46,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -70,7 +74,8 @@ fun FeedView(screen: FeedScreen, actions: Actions, on: PostHandlers, onViewOnWeb
     }
 
     PullToRefreshBox(
-        isRefreshing = screen.loading && screen.posts.isEmpty(),
+        // The skeleton cards show the first load; the spinner is for pulls.
+        isRefreshing = false,
         onRefresh = { screen.refresh() },
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -90,18 +95,25 @@ fun FeedView(screen: FeedScreen, actions: Actions, on: PostHandlers, onViewOnWeb
                         !screen.loading -> Notice("Nothing here.", modifier = Modifier.fillMaxWidth().padding(top = 96.dp))
                     }
                 }
+                if (screen.loading && screen.error == null) {
+                    item { Spacer(Modifier.height(6.dp)) }
+                    items(3) { SkeletonCard() }
+                }
             }
             return@PullToRefreshBox
         }
-        LazyColumn(state = screen.listState, modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = screen.listState,
+            contentPadding = PaddingValues(top = 6.dp, bottom = 12.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
             items(screen.posts, key = { it.name }) { post ->
                 PostCard(post, screen.showsSubreddit, actions, on)
-                HorizontalDivider()
             }
             item(key = "footer") {
                 when {
                     screen.error != null -> Notice(screen.error!!, "Try again", { screen.loadMore() }, Modifier.fillMaxWidth())
-                    screen.loading -> Loading()
+                    screen.loading -> SkeletonCard()
                     screen.endReached -> Notice("That's everything.", modifier = Modifier.fillMaxWidth())
                 }
             }
@@ -126,22 +138,31 @@ fun ThreadView(
         LazyColumn(state = screen.listState, modifier = Modifier.fillMaxSize()) {
             screen.post?.let { post ->
                 item(key = "post") {
-                    PostDetail(post, actions, on)
-                    HorizontalDivider()
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+                    ) {
+                        PostDetail(post, actions, on)
+                    }
                 }
             }
             if (screen.isSingleThread) {
                 item(key = "single") {
-                    Text(
-                        "You're viewing a single comment's thread. View all comments",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { screen.post?.let { on.openThread(it) } }
-                            .padding(16.dp),
-                    )
-                    HorizontalDivider()
+                            .padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                            .clip(CircleShape)
+                            .clickable { screen.post?.let { on.openThread(it) } },
+                    ) {
+                        Text(
+                            "Single comment thread · View all",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        )
+                    }
                 }
             }
             when {
@@ -150,13 +171,15 @@ fun ThreadView(
                 }
                 screen.loading && screen.items.isEmpty() -> item(key = "loading") { Loading() }
                 !screen.loading && screen.items.isEmpty() && screen.post != null -> item(key = "empty") {
-                    Notice("No comments yet.", modifier = Modifier.fillMaxWidth())
+                    Notice("No comments yet. Be the first on the web.", modifier = Modifier.fillMaxWidth())
                 }
             }
-            items(visible, key = { it.key }) { item ->
+            item(key = "gap") { Spacer(Modifier.height(8.dp)) }
+            itemsIndexed(visible, key = { _, it -> it.key }) { index, item ->
                 when (item) {
                     is Comment -> CommentRow(
                         comment = item,
+                        divider = index > 0,
                         collapsed = screen.collapsed.containsKey(item.name),
                         actions = actions,
                         onToggle = { screen.toggle(item) },
@@ -177,31 +200,35 @@ fun ThreadView(
     }
 }
 
+/** Thread line colors by depth: soft, distinct hues. */
 private val threadColors = listOf(
-    Color(0xFF4F86F7), Color(0xFF2EB67D), Color(0xFFE8A33D),
-    Color(0xFFD9534F), Color(0xFF9B59B6), Color(0xFF16A2B8),
+    Color(0xFFFF7A59), Color(0xFF4DA3FF), Color(0xFF2EC4B6),
+    Color(0xFFB57BFF), Color(0xFFFFB020), Color(0xFFF06292),
 )
 
-/** Indents a row for its depth, drawing the thread line on the left. */
+/** Indents a row for its depth, with a rounded thread line on the left. */
 @Composable
 private fun Indented(depth: Int, content: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = (8 + depth * 12).dp)) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = (16 + (depth - 1).coerceAtLeast(0) * 14).dp)) {
         if (depth > 0) {
             Box(
                 Modifier
-                    .padding(vertical = 4.dp)
+                    .padding(vertical = 2.dp)
                     .width(2.dp)
                     .fillMaxHeight()
-                    .background(threadColors[(depth - 1) % threadColors.size].copy(alpha = 0.6f)),
+                    .clip(CircleShape)
+                    .background(threadColors[(depth - 1) % threadColors.size].copy(alpha = 0.55f)),
             )
         }
-        Box(Modifier.weight(1f).padding(start = 8.dp)) { content() }
+        Box(Modifier.weight(1f).padding(start = if (depth > 0) 12.dp else 0.dp)) { content() }
     }
 }
 
 @Composable
 private fun CommentRow(
     comment: Comment,
+    /** Top-level comments get a divider above, except the first. */
+    divider: Boolean,
     collapsed: Boolean,
     actions: Actions,
     onToggle: () -> Unit,
@@ -209,44 +236,53 @@ private fun CommentRow(
     onUser: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onToggle)) {
-        if (comment.depth == 0) HorizontalDivider()
+        if (comment.depth == 0 && divider) {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
         Indented(comment.depth) {
-            Column(Modifier.padding(top = 6.dp, end = 4.dp, bottom = if (collapsed) 6.dp else 0.dp)) {
+            Column(Modifier.padding(top = 6.dp, end = 8.dp, bottom = if (collapsed) 8.dp else 2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val authorColor = when {
-                        comment.distinguished == "moderator" -> Color(0xFF2EB67D)
-                        comment.distinguished == "admin" -> Color(0xFFD9534F)
-                        comment.isOp -> MaterialTheme.colorScheme.primary
+                    Avatar(comment.author, 22.dp, Modifier.clickable { onUser(comment.author) })
+                    val authorColor = when (comment.distinguished) {
+                        "moderator" -> Color(0xFF2EB67D)
+                        "admin" -> Color(0xFFE5484D)
                         else -> MaterialTheme.colorScheme.onSurface
                     }
                     Text(
-                        comment.author + if (comment.isOp) " (OP)" else "",
+                        comment.author,
                         style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
                         color = authorColor,
-                        modifier = Modifier.clickable { onUser(comment.author) },
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .weight(1f, fill = false)
+                            .clickable { onUser(comment.author) },
                     )
+                    if (comment.isOp) {
+                        Box(Modifier.padding(start = 6.dp)) { Tag("OP", MaterialTheme.colorScheme.primary) }
+                    }
+                    if (comment.stickied) {
+                        Box(Modifier.padding(start = 6.dp)) { Tag("Pinned", MaterialTheme.colorScheme.tertiary) }
+                    }
                     Text(
-                        buildString {
-                            append(" · ${ago(comment.createdUtc)}")
-                            if (comment.stickied) append(" · pinned")
-                            if (collapsed) append(" · collapsed")
-                        },
+                        " · ${ago(comment.createdUtc)}" + if (collapsed) " · tap to expand" else "",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
                         maxLines = 1,
                     )
-                    if (!collapsed) {
-                        VoteControls(comment.name, comment.score, comment.likes, actions, comment.scoreHidden, small = true)
-                    }
+                    Spacer(Modifier.weight(1f))
+                    if (!collapsed) VoteControls(comment.name, comment.score, comment.likes, actions, comment.scoreHidden)
                 }
                 if (!collapsed) {
                     HtmlText(
                         comment.bodyHtml,
                         onLink = onLink,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 10.dp),
+                        modifier = Modifier.padding(start = 30.dp, bottom = 10.dp),
                     )
                 }
             }
@@ -257,21 +293,30 @@ private fun CommentRow(
 @Composable
 private fun MoreRow(more: More, loading: Boolean, onClick: () -> Unit) {
     Indented(more.depth) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().clickable(enabled = !loading, onClick = onClick).padding(vertical = 10.dp),
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(top = 4.dp, bottom = 10.dp)
+                .clip(CircleShape)
+                .clickable(enabled = !loading, onClick = onClick),
         ) {
-            Text(
-                when {
-                    more.children.isEmpty() -> "Continue this thread →"
-                    more.count == 1 -> "1 more reply"
-                    else -> "${more.count} more replies"
-                },
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            if (loading) {
-                CircularProgressIndicator(Modifier.padding(start = 12.dp).size(16.dp), strokeWidth = 2.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    when {
+                        more.children.isEmpty() -> "Continue this thread"
+                        more.count == 1 -> "1 more reply"
+                        else -> "${more.count} more replies"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (loading) {
+                    CircularProgressIndicator(Modifier.padding(start = 10.dp).size(14.dp), strokeWidth = 2.dp)
+                }
             }
         }
     }
@@ -279,8 +324,8 @@ private fun MoreRow(more: More, loading: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun Loading() {
-    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(Modifier.size(28.dp))
+    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
     }
 }
 

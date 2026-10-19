@@ -29,6 +29,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import app.lurk.data.Post
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AccountCircle
@@ -118,7 +128,7 @@ fun LurkApp(store: AccountStore) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AccountScreen(store: AccountStore, session: AccountSession, snackbar: SnackbarHostState) {
+internal fun AccountScreen(store: AccountStore, session: AccountSession, snackbar: SnackbarHostState) {
     val browser = session.browser
     val account = session.account ?: return
     val screen = session.current
@@ -136,6 +146,7 @@ private fun AccountScreen(store: AccountStore, session: AccountSession, snackbar
             openSubreddit = { name -> session.push(session.feed(name)) },
             openUser = { name -> session.openWeb(Links.user(name)) },
             openOnWeb = { post -> session.openWeb(Links.webOrigin + post.permalink) },
+            share = { post -> sharePost(context, post) },
         )
     }
 
@@ -158,9 +169,29 @@ private fun AccountScreen(store: AccountStore, session: AccountSession, snackbar
         }
     }
 
+    // The top bar slides away while scrolling down a list and comes back on the way up.
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    val title = when (screen) {
+        is FeedScreen -> screen.label
+        is ThreadScreen -> screen.post?.let { "r/${it.subreddit}" } ?: "Comments"
+        is WebScreen -> Links.locate(browser.url).label
+    }
+    val titleSubreddit = when (screen) {
+        is FeedScreen -> screen.subreddit
+        is ThreadScreen -> screen.post?.subreddit
+        is WebScreen -> null
+    }
+
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.background,
+                ),
                 navigationIcon = {
                     if (session.stack.size > 1) {
                         IconButton(onClick = { session.pop() }) {
@@ -169,21 +200,24 @@ private fun AccountScreen(store: AccountStore, session: AccountSession, snackbar
                     }
                 },
                 title = {
-                    Column {
-                        Text(
-                            when (screen) {
-                                is FeedScreen -> screen.label
-                                is ThreadScreen -> screen.post?.let { "r/${it.subreddit}" } ?: "Comments"
-                                is WebScreen -> Links.locate(browser.url).label
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            account.username?.let { "u/$it" } ?: "Not signed in",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        when {
+                            titleSubreddit != null -> Avatar(titleSubreddit, 36.dp)
+                            screen is FeedScreen -> HomeBadge()
+                        }
+                        Column(Modifier.padding(start = if (titleSubreddit != null || screen is FeedScreen) 12.dp else 0.dp)) {
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.titleLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                account.username?.let { "u/$it" } ?: "Not signed in",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -318,9 +352,24 @@ private fun BoxScope.WebPage(screen: WebScreen, browser: BrowserController) {
 private fun <T> SortMenu(label: String, options: List<T>, name: (T) -> String, onPick: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) {
-            Text(label, maxLines = 1)
-            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.padding(end = 4.dp).clip(CircleShape).clickable { open = true },
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Icon(LurkIcons.Sort, contentDescription = "Sort", modifier = Modifier.size(16.dp))
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 6.dp).widthIn(max = 96.dp),
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { option ->
@@ -347,7 +396,12 @@ private fun AccountMenu(
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
-            Icon(Icons.Default.AccountCircle, contentDescription = "Accounts")
+            val name = current.username
+            if (name != null) {
+                Avatar(name, 32.dp)
+            } else {
+                Icon(Icons.Default.AccountCircle, contentDescription = "Accounts", modifier = Modifier.size(30.dp))
+            }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             store.accounts.forEach { a ->
@@ -440,38 +494,88 @@ private fun SubredditBar(
     onSubreddit: (String) -> Unit,
     onSignIn: () -> Unit,
 ) {
-    Surface(tonalElevation = 3.dp) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
         LazyRow(
             modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item(key = "fixed:home") {
-                FilterChip(selected = selected == HOME_KEY, onClick = onHome, label = { Text("Home") })
+                BarChip("Home", selected == HOME_KEY, onHome) {
+                    Icon(Icons.Default.Home, null, Modifier.size(18.dp))
+                }
             }
             items(listOf("popular", "all"), key = { "fixed:$it" }) { name ->
-                FilterChip(
-                    selected = selected == name,
-                    onClick = { onSubreddit(name) },
-                    label = { Text(name.replaceFirstChar { it.uppercase() }) },
-                )
+                BarChip(name.replaceFirstChar { it.uppercase() }, selected == name, { onSubreddit(name) }, avatar = name)
             }
             when {
                 account.username == null -> item(key = "hint:signin") {
-                    AssistChip(onClick = onSignIn, label = { Text("Sign in to see your subreddits") })
+                    BarChip("Sign in to see your subreddits", false, onSignIn, accent = true)
                 }
                 account.subreddits.isEmpty() && syncing -> item(key = "hint:loading") {
-                    AssistChip(onClick = {}, enabled = false, label = { Text("Loading subscriptions…") })
+                    BarChip("Loading subscriptions…", false, {})
                 }
             }
             items(account.subreddits, key = { "sub:" + it.lowercase() }) { name ->
-                FilterChip(
-                    selected = selected == name.lowercase(),
-                    onClick = { onSubreddit(name) },
-                    label = { Text(name) },
-                )
+                BarChip(name, selected == name.lowercase(), { onSubreddit(name) }, avatar = name)
             }
         }
+    }
+}
+
+/** A pill in the subreddit bar: filled with the accent when selected. */
+@Composable
+private fun BarChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    accent: Boolean = false,
+    /** Shows this name's avatar before the label (white on the selected chip). */
+    avatar: String? = null,
+    leading: (@Composable () -> Unit)? = avatar?.let { name ->
+        { Avatar(name, 20.dp, tint = if (selected) MaterialTheme.colorScheme.onPrimary else null) }
+    },
+) {
+    val container = when {
+        selected -> MaterialTheme.colorScheme.primary
+        accent -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val content = when {
+        selected -> MaterialTheme.colorScheme.onPrimary
+        accent -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        shape = CircleShape,
+        color = container,
+        contentColor = content,
+        modifier = Modifier.height(38.dp).clip(CircleShape).clickable(onClick = onClick),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = if (leading != null) 8.dp else 14.dp, end = 14.dp),
+        ) {
+            if (leading != null) {
+                leading()
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        }
+    }
+}
+
+/** The Home feed's title badge. */
+@Composable
+private fun HomeBadge() {
+    Box(
+        Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Default.Home, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -533,6 +637,15 @@ private fun BoxScope.EngineHost(
             }
         }
     }
+}
+
+/** Shares a post's title and link through the system share sheet. */
+private fun sharePost(context: Context, post: Post) {
+    val send = Intent(Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(Intent.EXTRA_SUBJECT, post.title)
+        .putExtra(Intent.EXTRA_TEXT, "https://www.reddit.com" + post.permalink)
+    context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
 /** Web links open in a Custom Tab; mail/phone/etc. links go to whatever app handles them. */

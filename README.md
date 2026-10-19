@@ -46,6 +46,9 @@ Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see
 | `data/AccountSession.kt` | One active account: its browser, engine and syncing |
 | `ui/LurkApp.kt` | The app scaffold: top bar, menus, subreddit bar, screen switching |
 | `ui/Screens.kt`, `ui/PostViews.kt` | Feed, thread, comments and image viewer |
+| `ui/Theme.kt`, `ui/LurkIcons.kt` | Lurk's colors, type and shapes; its line icons |
+
+To look at the screens without a phone, run `./gradlew testDebugUnitTest --tests '*ScreenshotTest'`. It renders the feed, a thread and the loading state with sample data, in light and dark, to `app/build/screenshots/`.
 
 ## Being a good citizen
 

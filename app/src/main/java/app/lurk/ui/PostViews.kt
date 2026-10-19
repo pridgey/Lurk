@@ -1,28 +1,34 @@
 package app.lurk.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,19 +42,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.lurk.data.Actions
 import app.lurk.data.Picture
 import app.lurk.data.Post
 import app.lurk.data.PostMedia
 import app.lurk.data.Vote
 import coil.compose.AsyncImage
-
-val UpvoteColor = Color(0xFFFF4500)
-val DownvoteColor = Color(0xFF7193FF)
 
 /** What a post (or anything in it) can ask the app to do. */
 class PostHandlers(
@@ -57,105 +64,123 @@ class PostHandlers(
     val openImage: (String) -> Unit,
     val openSubreddit: (String) -> Unit,
     val openUser: (String) -> Unit,
-    /** Old Reddit's page for the post, for video playback. */
+    /** Reddit's own page for the post, for video playback. */
     val openOnWeb: (Post) -> Unit,
+    val share: (Post) -> Unit,
 )
 
-/** A post in a feed: compact, tapping it opens the thread. */
+private val CardShape = RoundedCornerShape(24.dp)
+private val MediaShape = RoundedCornerShape(16.dp)
+
+/** A post in a feed: a card; tapping it opens the thread. */
 @Composable
 fun PostCard(post: Post, showSubreddit: Boolean, actions: Actions, on: PostHandlers) {
-    Column(
-        Modifier
+    Surface(
+        shape = CardShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier
             .fillMaxWidth()
-            .clickable { on.openThread(post) }
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+            .clip(CardShape)
+            .clickable { on.openThread(post) },
     ) {
-        PostMeta(post, showSubreddit, on)
-        Row(Modifier.padding(top = 4.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp)) {
+            PostHeader(post, showSubreddit, on)
             Text(
                 post.title,
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.padding(top = 10.dp),
             )
-            post.thumbnail?.let { thumb ->
-                if (!post.over18 && !post.spoiler) {
-                    AsyncImage(
-                        model = thumb,
-                        contentDescription = "Link preview",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .padding(start = 12.dp)
-                            .size(72.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { on.openLink(post.url) },
-                    )
-                }
+            PostTags(post)
+            if (post.isSelf && post.selftext.isNotBlank()) {
+                Text(
+                    post.selftext,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
+            if (!post.isSelf && post.media == null) LinkPreview(post, on)
+            post.media?.let { PostMediaView(post, it, compact = true, on = on) }
+            PostActions(post, actions, on, onComments = { on.openThread(post) })
         }
-        PostTags(post)
-        if (!post.isSelf && post.media == null) LinkLine(post, on)
-        if (post.isSelf && post.selftext.isNotBlank()) {
-            Text(
-                post.selftext,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        }
-        post.media?.let { PostMediaView(post, it, compact = true, on = on) }
-        PostActions(post, actions, onComments = { on.openThread(post) })
     }
 }
 
-/** The post at the top of its thread: full text, all images. */
+/** The post at the top of its thread: full text, every image. */
 @Composable
 fun PostDetail(post: Post, actions: Actions, on: PostHandlers) {
-    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
-        PostMeta(post, showSubreddit = true, on = on)
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
+        PostHeader(post, showSubreddit = true, on = on)
         Text(
             post.title,
             style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = 12.dp),
         )
         PostTags(post)
-        if (!post.isSelf && post.media == null) LinkLine(post, on)
+        if (!post.isSelf && post.media == null) LinkPreview(post, on)
         post.media?.let { PostMediaView(post, it, compact = false, on = on) }
         post.selftextHtml?.let { html ->
             HtmlText(
                 html,
                 onLink = on.openLink,
                 style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.padding(top = 10.dp),
+                modifier = Modifier.padding(top = 12.dp),
             )
         }
-        PostActions(post, actions, onComments = null)
+        PostActions(post, actions, on, onComments = null)
+    }
+}
+
+/** A colored circle with a name's first letter. */
+@Composable
+fun Avatar(name: String, size: Dp, modifier: Modifier = Modifier, tint: Color? = null) {
+    val color = tint ?: nameColor(name)
+    Box(
+        modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            name.trimStart('_').take(1).uppercase(),
+            color = color,
+            fontWeight = FontWeight.Bold,
+            fontSize = (size.value * 0.45f).sp,
+        )
     }
 }
 
 @Composable
-private fun PostMeta(post: Post, showSubreddit: Boolean, on: PostHandlers) {
+private fun PostHeader(post: Post, showSubreddit: Boolean, on: PostHandlers) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (showSubreddit) {
-            Text(
-                "r/${post.subreddit}",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable { on.openSubreddit(post.subreddit) },
-            )
-            Text(" · ", style = MaterialTheme.typography.labelMedium, color = muted)
+            Avatar(post.subreddit, 34.dp, Modifier.clickable { on.openSubreddit(post.subreddit) })
+        } else {
+            Avatar(post.author, 34.dp, Modifier.clickable { on.openUser(post.author) })
         }
-        Text(
-            "u/${post.author}",
-            style = MaterialTheme.typography.labelMedium,
-            color = muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false).clickable { on.openUser(post.author) },
-        )
-        Text(" · ${ago(post.createdUtc)}", style = MaterialTheme.typography.labelMedium, color = muted)
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(
+                if (showSubreddit) "r/${post.subreddit}" else "u/${post.author}",
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clickable {
+                    if (showSubreddit) on.openSubreddit(post.subreddit) else on.openUser(post.author)
+                },
+            )
+            Text(
+                (if (showSubreddit) "u/${post.author} · " else "") + ago(post.createdUtc),
+                style = MaterialTheme.typography.labelMedium,
+                color = muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -164,63 +189,110 @@ private fun PostMeta(post: Post, showSubreddit: Boolean, on: PostHandlers) {
 private fun PostTags(post: Post) {
     val tags = buildList {
         if (post.stickied) add("Pinned" to MaterialTheme.colorScheme.tertiary)
-        if (post.over18) add("NSFW" to Color(0xFFD32F2F))
+        if (post.over18) add("NSFW" to Color(0xFFE5484D))
         if (post.spoiler) add("Spoiler" to MaterialTheme.colorScheme.onSurfaceVariant)
-        if (post.locked) add("Locked" to MaterialTheme.colorScheme.onSurfaceVariant)
+        if (post.locked) add("Locked" to Color(0xFFE5A50A))
         post.flair?.let { add(it to MaterialTheme.colorScheme.secondary) }
     }
     if (tags.isEmpty()) return
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier.padding(top = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(top = 8.dp),
     ) {
-        tags.forEach { (label, color) ->
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = color.copy(alpha = 0.14f),
-                contentColor = color,
+        tags.forEach { (label, color) -> Tag(label, color) }
+    }
+}
+
+@Composable
+fun Tag(label: String, color: Color) {
+    Surface(shape = CircleShape, color = color.copy(alpha = 0.13f), contentColor = color) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 220.dp).padding(horizontal = 10.dp, vertical = 3.dp),
+        )
+    }
+}
+
+/** A link post's target: thumbnail, domain, and an arrow, as one tappable tile. */
+@Composable
+private fun LinkPreview(post: Post, on: PostHandlers) {
+    Surface(
+        shape = MediaShape,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier
+            .padding(top = 10.dp)
+            .fillMaxWidth()
+            .clip(MediaShape)
+            .clickable { on.openLink(post.url) },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
+            val thumb = post.thumbnail?.takeIf { !post.over18 && !post.spoiler }
+            Box(
+                Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center,
             ) {
+                Icon(
+                    LurkIcons.External, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+                if (thumb != null) {
+                    AsyncImage(thumb, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
+            }
+            Column(Modifier.padding(horizontal = 12.dp).weight(1f)) {
                 Text(
-                    label,
-                    style = MaterialTheme.typography.labelSmall,
+                    post.domain.removePrefix("www."),
+                    style = MaterialTheme.typography.labelLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+                Text(
+                    post.url.removePrefix("https://").removePrefix("http://").removePrefix("www."),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+            Icon(
+                LurkIcons.External, "Open link",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(end = 6.dp).size(18.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun LinkLine(post: Post, on: PostHandlers) {
-    Text(
-        "${post.domain} ↗",
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .padding(top = 6.dp)
-            .clickable { on.openLink(post.url) },
-    )
-}
-
-@Composable
 private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: PostHandlers) {
     var revealed by remember(post.name) { mutableStateOf(!(post.over18 || post.spoiler)) }
-    val modifier = Modifier.padding(top = 8.dp)
+    val modifier = Modifier.padding(top = 10.dp)
     if (!revealed) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = modifier.fillMaxWidth().aspectRatio(2f).clickable { revealed = true },
+        Box(
+            modifier
+                .fillMaxWidth()
+                .aspectRatio(2f)
+                .clip(MediaShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .clickable { revealed = true },
+            contentAlignment = Alignment.Center,
         ) {
-            Box(contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Tag(if (post.over18) "NSFW" else "Spoiler", if (post.over18) Color(0xFFE5484D) else MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    (if (post.over18) "NSFW" else "Spoiler") + " · tap to show",
-                    style = MaterialTheme.typography.labelLarge,
+                    "Tap to show",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
         }
@@ -228,45 +300,50 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
     }
     when (media) {
         is PostMedia.Image -> PictureView(media.picture, modifier) { on.openImage(media.picture.fullUrl) }
-        is PostMedia.Video -> {
+        is PostMedia.Video -> Box(modifier, contentAlignment = Alignment.Center) {
             val preview = media.preview
-            Box(modifier, contentAlignment = Alignment.Center) {
-                if (preview != null) {
-                    PictureView(preview, Modifier) { on.openOnWeb(post) }
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clickable { on.openOnWeb(post) },
-                    ) {}
-                }
-                Surface(shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = 0.6f), contentColor = Color.White) {
-                    Icon(Icons.Default.PlayArrow, "Play video", Modifier.padding(10.dp).size(32.dp))
-                }
+            if (preview != null) {
+                PictureView(preview, Modifier) { on.openOnWeb(post) }
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(MediaShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .clickable { on.openOnWeb(post) },
+                )
+            }
+            Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White) {
+                Icon(Icons.Default.PlayArrow, "Play video", Modifier.padding(12.dp).size(30.dp))
             }
         }
-        is PostMedia.Gallery -> {
-            if (compact) {
-                Box(modifier) {
-                    PictureView(media.pictures.first(), Modifier) { on.openThread(post) }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color.Black.copy(alpha = 0.6f),
-                        contentColor = Color.White,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+        is PostMedia.Gallery -> if (compact) {
+            Box(modifier) {
+                PictureView(media.pictures.first(), Modifier) { on.openThread(post) }
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.55f),
+                    contentColor = Color.White,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     ) {
+                        Icon(LurkIcons.Images, null, Modifier.size(14.dp))
                         Text(
-                            "1 / ${media.pictures.size}",
+                            "${media.pictures.size}",
                             style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(start = 5.dp),
                         )
                     }
                 }
-            } else {
-                Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    media.pictures.forEach { picture ->
-                        PictureView(picture, Modifier) { on.openImage(picture.fullUrl) }
-                    }
+            }
+        } else {
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                media.pictures.forEach { picture ->
+                    PictureView(picture, Modifier) { on.openImage(picture.fullUrl) }
                 }
             }
         }
@@ -282,79 +359,176 @@ private fun PictureView(picture: Picture, modifier: Modifier, onClick: () -> Uni
         modifier = modifier
             .fillMaxWidth()
             // Very tall images are cropped in lists; the viewer shows them whole.
-            .aspectRatio(picture.aspect.coerceIn(0.8f, 3f))
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .aspectRatio(picture.aspect.coerceIn(0.8f, 2.4f))
+            .clip(MediaShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onClick),
     )
 }
 
 @Composable
-private fun PostActions(post: Post, actions: Actions, onComments: (() -> Unit)?) {
+private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onComments: (() -> Unit)?) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
     ) {
-        VoteControls(post.name, post.score, post.likes, actions, scoreHidden = false)
-        Spacer(Modifier.weight(1f))
-        if (onComments != null) {
-            TextButton(onClick = onComments) {
-                Text("${compact(post.numComments)} comments")
-            }
-        } else {
+        VotePill(post.name, post.score, post.likes, actions)
+        Pill(onClick = onComments) {
+            Icon(LurkIcons.Comment, null, Modifier.size(18.dp))
             Text(
-                "${compact(post.numComments)} comments",
+                compact(post.numComments),
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp),
             )
         }
+        Spacer(Modifier.weight(1f))
         val saved = actions.saved(post.name, post.saved)
-        IconButton(onClick = { actions.toggleSave(post.name, post.saved) }) {
-            Icon(
-                Icons.Default.Star,
-                contentDescription = if (saved) "Unsave" else "Save",
-                tint = if (saved) Color(0xFFFFB300) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        RoundIcon(
+            if (saved) LurkIcons.BookmarkFilled else LurkIcons.Bookmark,
+            if (saved) "Unsave" else "Save",
+            tint = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        ) { actions.toggleSave(post.name, post.saved) }
+        RoundIcon(LurkIcons.Share, "Share", MaterialTheme.colorScheme.onSurfaceVariant) { on.share(post) }
+    }
+}
+
+/** A rounded, tinted container for actions. */
+@Composable
+private fun Pill(
+    onClick: (() -> Unit)?,
+    color: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    content: @Composable () -> Unit,
+) {
+    Surface(
+        shape = CircleShape,
+        color = color,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.height(36.dp).clip(CircleShape).then(
+            if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+        ),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 12.dp),
+        ) { content() }
+    }
+}
+
+@Composable
+private fun RoundIcon(icon: ImageVector, description: String, tint: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, description, tint = tint, modifier = Modifier.size(20.dp))
+    }
+}
+
+private fun voteColor(vote: Vote, neutral: Color): Color = when (vote) {
+    Vote.Up -> UpvoteColor
+    Vote.Down -> DownvoteColor
+    Vote.None -> neutral
+}
+
+/** Up, score, down in one pill, tinted when voted. */
+@Composable
+private fun VotePill(name: String, score: Int, likes: Boolean?, actions: Actions) {
+    val vote = actions.vote(name, likes)
+    val neutral = MaterialTheme.colorScheme.onSurfaceVariant
+    val color by animateColorAsState(voteColor(vote, neutral), label = "vote")
+    val background by animateColorAsState(
+        if (vote == Vote.None) MaterialTheme.colorScheme.surfaceContainerHigh else voteColor(vote, neutral).copy(alpha = 0.14f),
+        label = "voteBg",
+    )
+    Surface(shape = CircleShape, color = background, modifier = Modifier.height(36.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            VoteButton(up = true, vote, color, neutral) { actions.toggleVote(name, likes, up = true) }
+            Text(
+                compact(actions.score(name, score, likes)),
+                style = MaterialTheme.typography.labelLarge,
+                color = if (vote == Vote.None) MaterialTheme.colorScheme.onSurface else color,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.widthIn(min = 28.dp),
             )
+            VoteButton(up = false, vote, color, neutral) { actions.toggleVote(name, likes, up = false) }
         }
     }
 }
 
-/** Up arrow, score, down arrow. */
 @Composable
-fun VoteControls(
-    name: String,
-    score: Int,
-    likes: Boolean?,
-    actions: Actions,
-    scoreHidden: Boolean,
-    small: Boolean = false,
-) {
+private fun VoteButton(up: Boolean, vote: Vote, activeColor: Color, neutral: Color, onClick: () -> Unit) {
+    val active = if (up) vote == Vote.Up else vote == Vote.Down
+    val icon = when {
+        up && active -> LurkIcons.UpvoteFilled
+        up -> LurkIcons.Upvote
+        active -> LurkIcons.DownvoteFilled
+        else -> LurkIcons.Downvote
+    }
+    Box(
+        Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            if (up) "Upvote" else "Downvote",
+            tint = if (active) activeColor else neutral,
+            modifier = Modifier.size(19.dp),
+        )
+    }
+}
+
+/** Compact up / score / down for comments, without a background. */
+@Composable
+fun VoteControls(name: String, score: Int, likes: Boolean?, actions: Actions, scoreHidden: Boolean) {
     val vote = actions.vote(name, likes)
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val iconSize = if (small) 20.dp else 24.dp
-    val buttonModifier = if (small) Modifier.size(32.dp) else Modifier
+    val neutral = MaterialTheme.colorScheme.onSurfaceVariant
+    val color by animateColorAsState(voteColor(vote, neutral), label = "vote")
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { actions.toggleVote(name, likes, up = true) }, modifier = buttonModifier) {
-            Icon(
-                Icons.Default.KeyboardArrowUp, "Upvote",
-                tint = if (vote == Vote.Up) UpvoteColor else muted,
-                modifier = Modifier.size(iconSize),
-            )
-        }
+        VoteButton(up = true, vote, color, neutral) { actions.toggleVote(name, likes, up = true) }
         Text(
             if (scoreHidden) "–" else compact(actions.score(name, score, likes)),
-            style = if (small) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
-            color = when (vote) { Vote.Up -> UpvoteColor; Vote.Down -> DownvoteColor; Vote.None -> muted },
-            modifier = Modifier.width(if (small) 32.dp else 40.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            textAlign = TextAlign.Center,
             maxLines = 1,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.widthIn(min = 24.dp),
         )
-        IconButton(onClick = { actions.toggleVote(name, likes, up = false) }, modifier = buttonModifier) {
-            Icon(
-                Icons.Default.KeyboardArrowDown, "Downvote",
-                tint = if (vote == Vote.Down) DownvoteColor else muted,
-                modifier = Modifier.size(iconSize),
-            )
+        VoteButton(up = false, vote, color, neutral) { actions.toggleVote(name, likes, up = false) }
+    }
+}
+
+/** A grey placeholder card that pulses while the feed loads. */
+@Composable
+fun SkeletonCard() {
+    val pulse by rememberInfiniteTransition(label = "skeleton").animateFloat(
+        initialValue = 0.45f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse",
+    )
+    val block = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = pulse)
+    Surface(
+        shape = CardShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(34.dp).clip(CircleShape).background(block))
+                Column(Modifier.padding(start = 10.dp)) {
+                    Box(Modifier.width(110.dp).height(11.dp).clip(CircleShape).background(block))
+                    Box(Modifier.padding(top = 6.dp).width(70.dp).height(9.dp).clip(CircleShape).background(block))
+                }
+            }
+            Box(Modifier.padding(top = 14.dp).fillMaxWidth(0.92f).height(15.dp).clip(CircleShape).background(block))
+            Box(Modifier.padding(top = 8.dp).fillMaxWidth(0.6f).height(15.dp).clip(CircleShape).background(block))
+            Box(Modifier.padding(top = 14.dp).fillMaxWidth().aspectRatio(1.9f).clip(MediaShape).background(block))
+            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.width(110.dp).height(36.dp).clip(CircleShape).background(block))
+                Box(Modifier.width(64.dp).height(36.dp).clip(CircleShape).background(block))
+            }
         }
     }
 }
@@ -371,7 +545,7 @@ fun Notice(text: String, action: String? = null, onAction: () -> Unit = {}, modi
             text,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
         if (action != null) TextButton(onClick = onAction) { Text(action) }
     }
