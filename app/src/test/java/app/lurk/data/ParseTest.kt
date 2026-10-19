@@ -93,9 +93,26 @@ class ParseTest {
     }
 
     @Test
-    fun youtubeHasNoStream() {
-        val post = Parse.post(JSONObject(postJson(""","post_hint":"rich:video"""")))
-        assertNull((post.media as PostMedia.Video).stream)
+    fun youtubeHasEmbedButNoStream() {
+        val post = Parse.post(JSONObject(postJson(""",
+            "post_hint":"rich:video",
+            "secure_media_embed":{"content":"<iframe width=\"356\" height=\"200\" src=\"https://www.youtube.com/embed/abc?feature=oembed\"></iframe>",
+              "width":356,"height":200},
+            "secure_media":{"type":"youtube.com","oembed":{"provider_name":"YouTube",
+              "thumbnail_url":"https://i.ytimg.com/vi/abc/hqdefault.jpg","thumbnail_width":480,"thumbnail_height":360}}""")))
+        val video = post.media as PostMedia.Video
+        assertNull(video.stream)
+        assertEquals("YouTube", video.embed?.provider)
+        assertTrue(video.embed!!.html.contains("youtube.com/embed/abc"))
+        assertEquals(356, video.embed!!.width)
+        assertEquals("https://i.ytimg.com/vi/abc/hqdefault.jpg", video.preview?.url) // no Reddit preview: oEmbed thumbnail
+    }
+
+    @Test
+    fun richVideoWithoutEmbedHasNeither() {
+        val video = Parse.post(JSONObject(postJson(""","post_hint":"rich:video""""))).media as PostMedia.Video
+        assertNull(video.stream)
+        assertNull(video.embed)
     }
 
     @Test

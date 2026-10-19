@@ -309,14 +309,27 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     }
 
     session.playingVideo?.let { post ->
-        (post.media as? PostMedia.Video)?.stream?.let { stream ->
-            VideoPlayer(
+        val media = post.media as? PostMedia.Video
+        val stream = media?.stream
+        val embed = media?.embed
+        when {
+            stream != null -> VideoPlayer(
                 stream,
                 onClose = { session.playingVideo = null },
                 onOpenOnWeb = {
                     session.playingVideo = null
                     session.openWeb(Links.webOrigin + post.permalink)
                 },
+            )
+            embed != null -> EmbedPlayer(
+                embed,
+                siteName = embed.provider ?: post.domain.removePrefix("www."),
+                onClose = { session.playingVideo = null },
+                onOpenSite = {
+                    session.playingVideo = null
+                    openExternal(context, Uri.parse(post.url))
+                },
+                onExternalLink = { uri -> openExternal(context, uri) },
             )
         }
     }

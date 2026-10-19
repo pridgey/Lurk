@@ -6,7 +6,7 @@ A personal Reddit client for Android that runs on the Reddit website instead of 
 - **Old Reddit first, www when it has to.** The engine starts on old.reddit.com. Old Reddit now sends some accounts to its login page (`/login?reason=lor2`) even when they're signed in; when that happens the app retries on www.reddit.com and uses it from then on, for data and web pages alike.
 - **Your subreddits, automatically.** The engine reads your username (`/api/me.json`) and subscriptions (`/subreddits/mine/subscriber.json`) and fills the subreddit bar along the bottom. It resyncs on launch, after you sign in, and whenever the app notices you signed in or out.
 - **Multiple accounts.** Each account lives in its own WebView profile (separate cookies), so you can switch between them from the account menu without signing out.
-- **Videos.** Reddit-hosted videos, and GIF/Imgur clips Reddit has converted, play in a full-screen player (Media3) with sound; GIF-style clips loop silently. Videos from other sites (YouTube and so on) open in their own app or a Custom Tab.
+- **Videos.** Reddit-hosted videos, and GIF/Imgur clips Reddit has converted, play in a full-screen player (Media3) with sound; GIF-style clips loop silently. Videos from other sites (YouTube, Vimeo, Twitch clips, ...) play full screen in that site's own embedded player; anything that can't be embedded opens in the site's app or a Custom Tab.
 - **Web fallback.** Sign-in, the inbox, user pages and anything else without a native screen open in a visible WebView showing old Reddit with a mobile skin (`assets/skin/skin.css`). **⋮ → View on web** shows any screen there too, which is also how you reply for now. Links to other sites open in a Custom Tab.
 
 ## Build and install
@@ -47,7 +47,7 @@ Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see
 | `data/AccountSession.kt` | One active account: its browser, engine and syncing |
 | `ui/LurkApp.kt` | The app scaffold: top bar, menus, subreddit bar, screen switching |
 | `ui/Screens.kt`, `ui/PostViews.kt` | Feed, thread, comments and image viewer |
-| `ui/VideoPlayer.kt` | The full-screen video player |
+| `ui/VideoPlayer.kt`, `ui/EmbedPlayer.kt` | Full-screen players: native for Reddit videos, embedded for other sites |
 | `ui/Theme.kt`, `ui/LurkIcons.kt` | Lurk's colors, type and shapes; its line icons |
 
 To look at the screens without a phone, run `./gradlew testDebugUnitTest --tests '*ScreenshotTest'`. It renders the feed, a thread and the loading state with sample data, in light and dark, to `app/build/screenshots/`.

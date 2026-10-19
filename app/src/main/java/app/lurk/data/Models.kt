@@ -21,12 +21,24 @@ data class VideoStream(
     val isGif: Boolean,
 )
 
+/** Another site's player, as the iframe HTML Reddit gives for embedding it. */
+data class VideoEmbed(
+    val html: String,
+    val width: Int,
+    val height: Int,
+    /** "YouTube", "Vimeo", ... */
+    val provider: String?,
+)
+
 /** The big media shown with a post. Plain links use [Post.thumbnail] instead. */
 sealed interface PostMedia {
     data class Image(val picture: Picture) : PostMedia
     data class Gallery(val pictures: List<Picture>) : PostMedia
-    /** [stream] is null for videos only their own site can play (e.g. YouTube). */
-    data class Video(val preview: Picture?, val stream: VideoStream?) : PostMedia
+    /**
+     * [stream]: a copy Reddit hosts, played natively. Otherwise [embed]: the site's own
+     * player (YouTube, Vimeo, ...). Neither: only the site itself can play it.
+     */
+    data class Video(val preview: Picture?, val stream: VideoStream?, val embed: VideoEmbed? = null) : PostMedia
 }
 
 data class Post(
@@ -246,12 +258,33 @@ object Parse {
         if (d.optBoolean("is_video") || hint == "hosted:video") {
             return PostMedia.Video(previewPicture(d), (hosted ?: converted)?.let(::videoStream))
         }
-        if (hint == "rich:video") return PostMedia.Video(previewPicture(d), converted?.let(::videoStream))
+        if (hint == "rich:video") {
+            val preview = previewPicture(d) ?: oembedThumbnail(d)
+            return PostMedia.Video(preview, converted?.let(::videoStream), embed(d))
+        }
         if (converted != null && hint != "image") {
             return PostMedia.Video(previewPicture(d), videoStream(converted))
         }
         if (hint == "image") return previewPicture(d)?.let { PostMedia.Image(it) }
         return null
+    }
+
+    private fun embed(d: JSONObject): VideoEmbed? {
+        val box = d.optJSONObject("secure_media_embed") ?: d.optJSONObject("media_embed") ?: return null
+        val html = box.str("content")?.takeIf { "<iframe" in it } ?: return null
+        val oembed = (d.optJSONObject("secure_media") ?: d.optJSONObject("media"))?.optJSONObject("oembed")
+        return VideoEmbed(
+            html = html,
+            width = box.optInt("width").takeIf { it > 0 } ?: oembed?.optInt("width") ?: 0,
+            height = box.optInt("height").takeIf { it > 0 } ?: oembed?.optInt("height") ?: 0,
+            provider = oembed?.str("provider_name"),
+        )
+    }
+
+    private fun oembedThumbnail(d: JSONObject): Picture? {
+        val o = (d.optJSONObject("secure_media") ?: d.optJSONObject("media"))?.optJSONObject("oembed") ?: return null
+        val url = o.str("thumbnail_url") ?: return null
+        return Picture(url, url, o.optInt("thumbnail_width"), o.optInt("thumbnail_height"))
     }
 
     private fun videoStream(v: JSONObject): VideoStream? {

@@ -58,11 +58,14 @@ class AccountSession(
     /** A post whose video is open in the full-screen player. */
     var playingVideo by mutableStateOf<Post?>(null)
 
-    /** Plays a post's video here if Reddit hosts a copy, else hands it to its own site. */
+    /**
+     * Plays a post's video here: natively if Reddit hosts a copy, else in its site's
+     * embedded player; failing both, hands it to the site.
+     */
     fun openVideo(post: Post) {
         val media = post.media as? PostMedia.Video ?: return
         when {
-            media.stream != null -> playingVideo = post
+            media.stream != null || media.embed != null -> playingVideo = post
             Links.isRedditHost(Uri.parse(post.url).host.orEmpty()) -> openWeb(Links.webOrigin + post.permalink)
             else -> openLink(post.url) // e.g. YouTube: its app or a Custom Tab
         }

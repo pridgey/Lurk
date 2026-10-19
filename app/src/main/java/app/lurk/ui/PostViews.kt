@@ -321,7 +321,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
             }
             val stream = media.stream
             val badge = when {
-                stream == null -> post.domain.removePrefix("www.")
+                stream == null -> media.embed?.provider ?: post.domain.removePrefix("www.")
                 stream.isGif -> "GIF"
                 stream.durationSec > 0 -> duration(stream.durationSec)
                 else -> null
@@ -334,7 +334,8 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
                     modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
-                        if (stream == null) Icon(LurkIcons.External, null, Modifier.padding(end = 5.dp).size(13.dp))
+                        // ↗ marks videos that can only play on their own site.
+                        if (stream == null && media.embed == null) Icon(LurkIcons.External, null, Modifier.padding(end = 5.dp).size(13.dp))
                         Text(badge, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     }
                 }
