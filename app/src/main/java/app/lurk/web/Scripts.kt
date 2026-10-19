@@ -17,7 +17,6 @@ class Scripts(context: Context) {
     }
 
     val whoami: String by lazy { read("engine/whoami.js") }
-    val session: String by lazy { read("engine/session.js") }
 }
 
 /**

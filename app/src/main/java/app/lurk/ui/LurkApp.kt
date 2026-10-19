@@ -64,7 +64,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -132,8 +134,8 @@ private fun AccountScreen(store: AccountStore, session: AccountSession, snackbar
             openLink = { url -> session.openLink(url) },
             openImage = { url -> session.viewingImage = url },
             openSubreddit = { name -> session.push(session.feed(name)) },
-            openUser = { name -> session.openWeb("${Links.OLD_ORIGIN}/user/$name/") },
-            openOnWeb = { post -> session.openWeb(Links.OLD_ORIGIN + post.permalink) },
+            openUser = { name -> session.openWeb(Links.user(name)) },
+            openOnWeb = { post -> session.openWeb(Links.webOrigin + post.permalink) },
         )
     }
 
@@ -493,6 +495,12 @@ private fun BoxScope.EngineHost(
         )
         return
     }
+    val clipboard = LocalClipboardManager.current
+    val report = buildString {
+        engine.log.forEach { appendLine(it) }
+        appendLine()
+        append(engine.lastResult ?: "No response yet.")
+    }
     Surface(Modifier.fillMaxSize(), tonalElevation = 2.dp) {
         Column {
             Row(
@@ -503,6 +511,7 @@ private fun BoxScope.EngineHost(
                 TextButton(onClick = onSync, enabled = !syncing) {
                     Text(if (syncing) "Syncing…" else "Run sync")
                 }
+                TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
                 TextButton(onClick = onClose) { Text("Close") }
             }
             AndroidView(
@@ -512,11 +521,7 @@ private fun BoxScope.EngineHost(
             HorizontalDivider()
             SelectionContainer {
                 Text(
-                    text = buildString {
-                        engine.log.takeLast(12).forEach { appendLine(it) }
-                        appendLine()
-                        append(engine.lastResult ?: "No extraction yet.")
-                    },
+                    text = report,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     modifier = Modifier

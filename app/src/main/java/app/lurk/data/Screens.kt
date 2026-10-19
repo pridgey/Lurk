@@ -112,7 +112,7 @@ class ThreadScreen(
     private var job: Job? = null
     private var generation = 0
 
-    val webUrl: String get() = app.lurk.web.Links.OLD_ORIGIN + permalink
+    val webUrl: String get() = app.lurk.web.Links.webOrigin + permalink
 
     fun load() {
         generation++

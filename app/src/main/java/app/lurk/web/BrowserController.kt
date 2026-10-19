@@ -27,6 +27,8 @@ class BrowserController(
      * none) and whether the page says someone is signed in.
      */
     private val onPageUser: (username: String?, loggedIn: Boolean) -> Unit,
+    /** Called after every page load, on any host. */
+    private val onPageLoaded: () -> Unit,
 ) {
     val webView: WebView = WebSetup.create(context, profile, scripts)
 
@@ -49,7 +51,7 @@ class BrowserController(
                 // Server redirects don't, so "View on web" stays on the web.
                 val target = when (decision) {
                     is Links.Decision.Rewrite -> decision.uri
-                    Links.Decision.Stay -> request.url.takeIf { Links.isOldReddit(it.toString()) }
+                    Links.Decision.Stay -> request.url
                     else -> null
                 }
                 if (!request.isRedirect && target != null && Links.route(target) != null && onNative(target)) {
@@ -75,6 +77,7 @@ class BrowserController(
                     view.clearHistory()
                     canGoBack = false
                 }
+                onPageLoaded()
                 // Old Reddit's login page is new-style Reddit: no skin, and nobody to report yet.
                 if (!Links.isOldReddit(url) || Links.isSignInPage(url)) return
                 // Fallback for WebViews without document-start scripts; a no-op otherwise.

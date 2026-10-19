@@ -6,15 +6,28 @@ import android.net.Uri
 object Links {
     const val OLD_HOST = "old.reddit.com"
     const val OLD_ORIGIN = "https://old.reddit.com"
-    const val HOME = "https://old.reddit.com/"
-    const val INBOX = "https://old.reddit.com/message/inbox/"
+    const val WWW_ORIGIN = "https://www.reddit.com"
+
+    /**
+     * Where Reddit pages and data come from: old Reddit, or www.reddit.com when old
+     * Reddit turns a signed-in account away (it sends it to /login?reason=lor2 even
+     * with a valid login). Set by [app.lurk.data.RedditApi] for the active account.
+     */
+    @Volatile
+    var webOrigin: String = OLD_ORIGIN
+
+    val usingOld: Boolean get() = webOrigin == OLD_ORIGIN
+
+    val HOME: String get() = "$webOrigin/"
+    val INBOX: String get() = "$webOrigin/message/inbox/"
     /**
      * Sign in on old Reddit's own login page. Old Reddit sends signed-out visitors there
      * (/login?reason=lor2), and a sign-in on www.reddit.com doesn't carry over to it.
      */
     const val LOGIN = "https://old.reddit.com/login/?dest=https%3A%2F%2Fold.reddit.com%2F"
 
-    fun subreddit(name: String) = "https://old.reddit.com/r/$name/"
+    fun subreddit(name: String) = "$webOrigin/r/$name/"
+    fun user(name: String) = "$webOrigin/user/$name/"
 
     sealed interface Decision {
         /** Let the WebView load it. */
@@ -71,9 +84,15 @@ object Links {
         }
         val host = uri.host?.lowercase() ?: return Decision.Stay
         if (!isRedditHost(host)) return Decision.External
+        val path = uri.path ?: "/"
+
+        if (!usingOld) {
+            // Old Reddit is walled off for this account: send its links to www instead.
+            if (host != OLD_HOST || isSignInPage(uri.toString())) return Decision.Stay
+            return Decision.Rewrite(uri.buildUpon().scheme("https").authority("www.reddit.com").build())
+        }
         if (host !in newRedditHosts) return Decision.Stay
 
-        val path = uri.path ?: "/"
         if (newRedditOnly.any { path.startsWith(it) } || shareLink.containsMatchIn(path)) {
             return Decision.Stay
         }
@@ -93,7 +112,7 @@ object Links {
         val uri = Uri.parse(raw.trim())
         if (uri.scheme != null) return uri
         val path = if (raw.startsWith("/")) raw.trim() else "/" + raw.trim()
-        return Uri.parse(OLD_ORIGIN + path)
+        return Uri.parse(webOrigin + path)
     }
 
     /** The native screen for [uri], or null if it has to be shown on the web. */
@@ -144,7 +163,7 @@ object Links {
         val seg = uri.pathSegments
 
         if (isSignInPage(url)) return Location("Sign in")
-        if (host != OLD_HOST) return Location(host.removePrefix("www."))
+        if (host != OLD_HOST && host !in newRedditHosts) return Location(host.removePrefix("www."))
         return when {
             seg.isEmpty() || seg[0] in homeSorts -> Location("Home", isHome = true)
             seg[0] == "r" && seg.size >= 2 -> Location("r/${seg[1]}", subreddit = seg[1].lowercase())

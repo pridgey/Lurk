@@ -38,6 +38,13 @@ object WebProfiles {
     fun cookiesOf(webView: WebView): CookieManager =
         if (supported) WebViewCompat.getProfile(webView).cookieManager else CookieManager.getInstance()
 
+    /** The value of Reddit's login cookie (reddit_session) in [webView]'s jar, if any. */
+    fun loginCookie(webView: WebView): String? =
+        cookiesOf(webView).getCookie(Links.OLD_ORIGIN).orEmpty().split(';')
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("reddit_session=") }
+            ?.substringAfter('=')?.takeIf { it.isNotEmpty() }
+
     /**
      * Signs a profile out by clearing its cookies and storage, then deletes it once
      * its WebViews are gone. With no profile support this wipes the default profile.

@@ -2,8 +2,9 @@
 
 A personal Reddit client for Android that runs on the Reddit website instead of the API.
 
-- **Native screens, fed by a hidden browser.** Feeds, posts and comment threads are native Compose screens. Their data comes from a hidden "engine" WebView that asks old Reddit for the JSON version of each page (the same URL with `.json` on the end) using your own signed-in cookies. Votes and saves go through the engine the same way the old Reddit site sends them.
-- **Your subreddits, automatically.** The engine reads your subscriptions from `old.reddit.com/subreddits/mine` and fills the subreddit bar along the bottom. It resyncs on launch and whenever the app notices you signed in or out.
+- **Native screens, fed by a hidden browser.** Feeds, posts and comment threads are native Compose screens. Their data comes from a hidden "engine" WebView that asks Reddit for the JSON version of each page (the same URL with `.json` on the end) using your own signed-in cookies. Votes and saves go through the engine the same way the old Reddit site sends them.
+- **Old Reddit first, www when it has to.** The engine starts on old.reddit.com. Old Reddit now sends some accounts to its login page (`/login?reason=lor2`) even when they're signed in; when that happens the app retries on www.reddit.com and uses it from then on, for data and web pages alike.
+- **Your subreddits, automatically.** The engine reads your username (`/api/me.json`) and subscriptions (`/subreddits/mine/subscriber.json`) and fills the subreddit bar along the bottom. It resyncs on launch, after you sign in, and whenever the app notices you signed in or out.
 - **Multiple accounts.** Each account lives in its own WebView profile (separate cookies), so you can switch between them from the account menu without signing out.
 - **Web fallback.** Sign-in, the inbox, user pages and anything else without a native screen open in a visible WebView showing old Reddit with a mobile skin (`assets/skin/skin.css`). **⋮ → View on web** shows any screen there too, which is also how you reply and play videos for now. Links to other sites open in a Custom Tab.
 
@@ -21,12 +22,11 @@ Use your Reddit username and password. Reddit may refuse to show anything until 
 
 ## When something breaks
 
-Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see what the hidden engine loaded, its log, and the raw data it extracted.
+Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see the hidden engine's log and the start of the last response. **Copy** puts all of it on the clipboard. Each sync logs which cookies the account has (names only) and whether Reddit's login cookie is there.
 
 - **Feeds or threads show an error:** Engine debug lists each request the engine made, its HTTP status, and the start of the last response. Reddit's JSON format rarely changes; the parsing lives in `data/Models.kt` and is covered by `app/src/test/.../ParseTest.kt`.
-- **Subreddit bar is empty but you're signed in:** the subscription selectors in `assets/engine/session.js` no longer match. In a desktop browser, open `old.reddit.com/subreddits/mine`, save the page (Ctrl+S, "Web page, HTML only"), and share it along with the Engine debug output.
+- **Signed in but the app says you aren't:** check the sync lines in Engine debug. "Login cookie: missing" means the sign-in didn't stick; "present" with "Signed in as: nobody" means Reddit isn't accepting it on either old Reddit or www.
 - **Pages look wrong:** adjust `assets/skin/skin.css`. It's plain CSS against old Reddit's markup; testing changes in a desktop browser with the Stylus extension first is fastest.
-- **Signed-in state not detected:** check `assets/engine/whoami.js`, which reads the username from old Reddit's header. Syncs also ask `/api/me.json` when the header gives no username, and Engine debug notes when that happened.
 
 ## Layout
 
@@ -34,12 +34,11 @@ Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see
 | --- | --- |
 | `assets/skin/skin.css` | The mobile skin for old Reddit |
 | `assets/skin/inject.js` | Injects the skin before each page paints |
-| `assets/engine/session.js` | Extracts username + subscriptions (hidden engine) |
-| `assets/engine/whoami.js` | Reports who's signed in on each page you view |
-| `web/RedditEngine.kt` | The hidden WebView engine: loads pages, runs extractors, makes signed-in requests |
+| `assets/engine/whoami.js` | Reports who's signed in on each old Reddit page you view |
+| `web/RedditEngine.kt` | The hidden WebView engine: makes signed-in requests and passes back the responses |
 | `web/BrowserController.kt` | The visible fallback WebView, link routing, page-user detection |
 | `web/Links.kt` | URL rules: native screen, rewrite to old Reddit, keep, or open externally |
-| `data/RedditApi.kt` | Feeds, threads, more comments, votes and saves, via the engine |
+| `data/RedditApi.kt` | Feeds, threads, more comments, votes, saves, username and subscriptions, via the engine; old-to-www fallback |
 | `data/Models.kt` | Posts and comments, parsed from Reddit's JSON |
 | `data/Screens.kt` | The back stack's screens and their loading state; vote/save state |
 | `web/WebProfiles.kt` | Per-account WebView profiles (multi-account) |

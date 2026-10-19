@@ -1,5 +1,6 @@
 package app.lurk.data
 
+import app.lurk.web.HttpResult
 import app.lurk.web.Links
 import app.lurk.web.RedditEngine
 import org.json.JSONArray
@@ -36,15 +37,56 @@ class RedditException(message: String) : Exception(message)
  * Reddit's JSON versions of its own pages (append .json), requested by the hidden
  * engine with the account's cookies. Votes and saves are the same form posts the
  * old Reddit site makes.
+ *
+ * Starts on old Reddit. If old Reddit sends a request to its login page (it does this
+ * even for some signed-in accounts), the request is retried on www.reddit.com, and if
+ * that works, www is used from then on, for data and for web pages ([Links.webOrigin]).
  */
 class RedditApi(private val engine: RedditEngine) {
 
     /** The account's anti-CSRF token, needed for votes and saves. Fetched on first use. */
     private var modhash: String? = null
 
-    /** Call when the signed-in account changes. */
+    init {
+        Links.webOrigin = Links.OLD_ORIGIN
+    }
+
+    /** Call when the signed-in account changes. Keeps the origin, which the sign-in check just chose. */
     fun forget() {
         modhash = null
+    }
+
+    /** The signed-in username, or null when signed out. */
+    suspend fun whoAmI(): String? {
+        val name = try {
+            getObject("/api/me.json").optJSONObject("data")?.optString("name")?.takeIf { it.isNotBlank() }
+        } catch (e: RedditException) {
+            null // signed-out visitors get sent to the login page
+        }
+        engine.note("Signed in as: ${name?.let { "u/$it" } ?: "nobody"} (via ${Links.webOrigin.removePrefix("https://")})")
+        return name
+    }
+
+    /** The account's subscribed subreddits, alphabetical. */
+    suspend fun subscriptions(): List<String> {
+        val names = linkedMapOf<String, String>()
+        var after: String? = null
+        var pages = 0
+        do {
+            val page = getObject(
+                "/subreddits/mine/subscriber.json?raw_json=1&limit=100" + (after?.let { "&after=$it" } ?: ""),
+            )
+            val data = page.optJSONObject("data") ?: break
+            val children = data.optJSONArray("children") ?: JSONArray()
+            for (i in 0 until children.length()) {
+                val name = children.getJSONObject(i).optJSONObject("data")?.optString("display_name").orEmpty()
+                // Followed users show up as "u_name" subreddits; leave those out.
+                if (name.isNotBlank() && !name.startsWith("u_")) names.putIfAbsent(name.lowercase(), name)
+            }
+            after = data.optString("after").takeIf { !data.isNull("after") && it.isNotBlank() }
+            pages++
+        } while (after != null && pages < 10)
+        return names.values.sortedBy { it.lowercase() }
     }
 
     fun feedUrl(subreddit: String?, sort: FeedSort): String {
@@ -91,16 +133,9 @@ class RedditApi(private val engine: RedditEngine) {
 
     private suspend fun post(path: String, form: Map<String, String>) {
         val token = modhash ?: fetchModhash().also { modhash = it }
-        val result = engine.request(Links.OLD_ORIGIN + path, form + ("uh" to token))
+        val result = send(path, form + ("uh" to token))
         if (result.status == 403) modhash = null // token may have rotated; refetch next time
         check(result)
-    }
-
-    /** The signed-in username, or null when signed out. */
-    suspend fun whoAmI(): String? = try {
-        getObject("/api/me.json").optJSONObject("data")?.optString("name")?.takeIf { it.isNotBlank() }
-    } catch (e: RedditException) {
-        null // signed-out visitors get sent to the login page
     }
 
     private suspend fun fetchModhash(): String {
@@ -113,16 +148,32 @@ class RedditApi(private val engine: RedditEngine) {
         getJson(pathAndQuery) as? JSONObject ?: throw RedditException("Reddit sent something unexpected")
 
     private suspend fun getJson(pathAndQuery: String): Any {
-        val result = engine.request(Links.OLD_ORIGIN + pathAndQuery)
+        val result = send(pathAndQuery, null)
         check(result)
         return runCatching { org.json.JSONTokener(result.body).nextValue() }.getOrNull()
             ?.takeIf { it is JSONObject || it is JSONArray }
             ?: throw RedditException("Reddit sent a web page instead of data. Try \"View on web\".")
     }
 
-    private fun check(result: app.lurk.web.HttpResult) {
+    /** Sends a request to the current origin, moving to www if old Reddit turns it away. */
+    private suspend fun send(path: String, form: Map<String, String>?): HttpResult {
+        val result = engine.request(Links.webOrigin + path, form)
+        if (!Links.usingOld || !sentToLogin(result)) return result
+
+        engine.note("Old Reddit sent us to its login page; trying www.reddit.com")
+        val retry = engine.request(Links.WWW_ORIGIN + path, form)
+        if (retry.status != 200 || sentToLogin(retry)) return result
+        engine.note("www.reddit.com works; using it from now on")
+        Links.webOrigin = Links.WWW_ORIGIN
+        return retry
+    }
+
+    private fun sentToLogin(result: HttpResult): Boolean =
+        android.net.Uri.parse(result.url).path.orEmpty().startsWith("/login")
+
+    private fun check(result: HttpResult) {
         // Reddit sends signed-out visitors it doesn't trust to the login page instead.
-        if (android.net.Uri.parse(result.url).path.orEmpty().startsWith("/login")) {
+        if (sentToLogin(result)) {
             throw RedditException("Reddit wants you to sign in before browsing. Use the account menu to sign in.")
         }
         when (result.status) {

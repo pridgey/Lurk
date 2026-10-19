@@ -43,6 +43,7 @@ class AccountSession(
         context, profile, scripts, onExternal,
         onNative = { uri -> takeOverFromWeb(uri) },
         onPageUser = { user, loggedIn -> scope.launch { onPageUser(user, loggedIn) } },
+        onPageLoaded = { onWebPageLoaded() },
     )
 
     /** The back stack; the last entry is on screen. Never empty: the UI reads it on first draw. */
@@ -125,7 +126,7 @@ class AccountSession(
         if (current !is WebScreen) return false
         // Leaving sign-in: let old Reddit load. Its page reports who's signed in, and the
         // sync that triggers switches to the native feed.
-        if (!Links.isOldReddit(browser.url) || Links.isSignInPage(browser.url)) return false
+        if (browser.url == null || Links.isSignInPage(browser.url)) return false
         push(screenFor(route))
         return true
     }
@@ -147,6 +148,21 @@ class AccountSession(
             reset(feed(null))
         }
         if (name != null) onMessage("Signed out of u/$name")
+    }
+
+    /** The login cookie at the last sync triggered by a web page, to sync once per sign-in. */
+    private var lastLoginCookie: String? = null
+
+    /**
+     * After any web page loads while signed out: a new login cookie means sign-in just
+     * finished, even if the page itself (e.g. old Reddit's login wall) doesn't show it.
+     */
+    private fun onWebPageLoaded() {
+        if (account?.username != null) return
+        val cookie = WebProfiles.loginCookie(browser.webView) ?: return
+        if (cookie == lastLoginCookie) return
+        lastLoginCookie = cookie
+        requestSync()
     }
 
     /** The page reports who's signed in; resync when that changes (login, logout, switch). */
@@ -187,9 +203,11 @@ class AccountSession(
 
     private suspend fun syncOnce() {
         try {
-            val snap = engine.fetchSession()
-            // The page header is one way to tell who's signed in; ask Reddit directly too.
-            val user = snap.username ?: api.whoAmI()
+            engine.note("Sync started")
+            engine.logCookies()
+            val user = api.whoAmI()
+            val subreddits = if (user != null) api.subscriptions() else emptyList()
+            engine.note("Sync done: ${user?.let { "u/$it" } ?: "signed out"}, ${subreddits.size} subscriptions")
 
             if (user != null) {
                 val existing = store.accounts.firstOrNull {
@@ -209,7 +227,7 @@ class AccountSession(
             store.update(accountId) {
                 it.copy(
                     username = user,
-                    subreddits = if (user != null) snap.subreddits else emptyList(),
+                    subreddits = subreddits,
                     syncedAt = System.currentTimeMillis(),
                 )
             }
@@ -217,9 +235,6 @@ class AccountSession(
                 // Signed in, out, or as someone else: what we've loaded belongs to the old state.
                 api.forget()
                 if (current !is WebScreen || user != null) reset(feed(null))
-            }
-            if (user != null && snap.selectorsMatched == 0) {
-                onMessage("Signed in, but couldn't read your subscriptions. See Engine debug.")
             }
         } catch (e: TimeoutCancellationException) {
             onMessage("Sync timed out. Check your connection.")

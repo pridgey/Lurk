@@ -1,6 +1,7 @@
 package app.lurk.web
 
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -18,14 +19,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
-import kotlin.coroutines.resume
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
-import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -34,13 +32,6 @@ import org.json.JSONObject
  */
 class HttpResult(val status: Int, val body: String, val url: String)
 
-data class SessionSnapshot(
-    val username: String?,
-    val subreddits: List<String>,
-    /** How many of the extractor's selectors found anything. 0 while signed in means it broke. */
-    val selectorsMatched: Int,
-)
-
 /**
  * The hidden "engine": a WebView the user never sees (unless Engine debug is open)
  * that loads Reddit pages and pulls data out of them for the native UI.
@@ -48,7 +39,7 @@ data class SessionSnapshot(
  * page) and hands the responses back through a JavaScript bridge.
  * All calls run on the main thread and one at a time, with a gap between requests.
  */
-class RedditEngine(context: Context, profile: String?, private val scripts: Scripts) {
+class RedditEngine(context: Context, profile: String?, scripts: Scripts) {
 
     val webView: WebView = WebSetup.create(context, profile, scripts)
 
@@ -61,7 +52,7 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
     /** Recent activity, newest last; shown in Engine debug. */
     val log = mutableStateListOf<String>()
 
-    /** The last raw extraction result, pretty-printed; shown in Engine debug. */
+    /** The start of the last response; shown in Engine debug. */
     var lastResult by mutableStateOf<String?>(null)
         private set
 
@@ -94,60 +85,22 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
         }
     }
 
-    suspend fun fetchSession(): SessionSnapshot = mutex.withLock { doFetchSession() }
-
-    private suspend fun doFetchSession(): SessionSnapshot {
-        note("Sync started")
-        // Names only: enough to see whether the login cookie is there, without exposing it.
-        val cookieNames = WebProfiles.cookiesOf(webView).getCookie(Links.OLD_ORIGIN).orEmpty()
+    /** Logs which cookies the account has for Reddit (names only) and whether it's signed in. */
+    fun logCookies() {
+        val names = WebProfiles.cookiesOf(webView).getCookie(Links.OLD_ORIGIN).orEmpty()
             .split(';').map { it.substringBefore('=').trim() }.filter { it.isNotEmpty() }
-        note("Cookies: ${cookieNames.joinToString().ifEmpty { "none" }}")
-        note("Login cookie (reddit_session): ${if ("reddit_session" in cookieNames) "present" else "missing"}")
-        var next: String? = SUBSCRIPTIONS_URL
-        var username: String? = null
-        var matched = 0
-        val subs = linkedMapOf<String, String>()
-        var page = 0
-
-        while (next != null && page < MAX_PAGES) {
-            val landed = load(next)
-            val result = evalJson(scripts.session)
-            lastResult = result.toString(2)
-
-            if (page == 0) {
-                username = result.optNullableString("username")
-                // Keep reading anyway: the header may have changed while the list still works,
-                // and the app double-checks who's signed in another way.
-                if (username == null) note("No username in page header (landed on $landed)")
-            }
-
-            val found = result.optJSONArray("subreddits") ?: JSONArray()
-            for (i in 0 until found.length()) {
-                val name = found.getString(i)
-                subs.putIfAbsent(name.lowercase(), name)
-            }
-            matched += result.optJSONArray("matched")?.length() ?: 0
-            note("Page ${page + 1}: ${found.length()} subreddits")
-
-            // The sidebar list has everything on one page; no need to page through the rest.
-            if (result.optBoolean("complete")) break
-
-            next = result.optNullableString("next")
-            page++
-            if (next != null) delay(PAGE_DELAY_MS) // human pace between pages
-        }
-
-        val list = subs.values.sortedBy { it.lowercase() }
-        note("Sync done: ${username?.let { "u/$it" } ?: "signed out"}, ${list.size} subscriptions")
-        return SessionSnapshot(username, list, matched)
+        note("Cookies: ${names.joinToString().ifEmpty { "none" }}")
+        note("Login cookie (reddit_session): ${if ("reddit_session" in names) "present" else "missing"}")
     }
 
     /**
-     * Requests [url] (on old.reddit.com) with the account's cookies. [form] makes it a
+     * Requests [url] (on a Reddit origin) with the account's cookies. [form] makes it a
      * form POST. Requests are spaced out so the engine stays at a human pace.
      */
     suspend fun request(url: String, form: Map<String, String>? = null): HttpResult = mutex.withLock {
-        if (!Links.isOldReddit(webView.url)) load(ORIGIN_PAGE) // fetch() has to run on old Reddit
+        // fetch() runs from a page on the same origin, so cookies go along and CORS allows reading.
+        val origin = originOf(url)
+        if (originOf(webView.url) != origin) load("$origin/robots.txt")
 
         val wait = lastRequestAt + REQUEST_GAP_MS - SystemClock.elapsedRealtime()
         if (wait > 0) delay(wait)
@@ -171,7 +124,7 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
             })();
         """.trimIndent()
 
-        note((if (form == null) "GET " else "POST ") + url.removePrefix(Links.OLD_ORIGIN).substringBefore('?'))
+        note((if (form == null) "GET " else "POST ") + url.removePrefix("https://").substringBefore('?'))
         webView.evaluateJavascript(script, null)
         try {
             val result = withTimeout(LOAD_TIMEOUT_MS) { waiter.await() }
@@ -182,6 +135,9 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
             pending.remove(id)
         }
     }
+
+    private fun originOf(url: String?): String? =
+        url?.let { Uri.parse(it) }?.let { if (it.host == null) null else "${it.scheme}://${it.host}" }
 
     private fun encode(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
 
@@ -200,15 +156,7 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
         return webView.url.orEmpty()
     }
 
-    private suspend fun evalJson(script: String): JSONObject {
-        val raw = suspendCancellableCoroutine<String?> { cont ->
-            webView.evaluateJavascript(script) { cont.resume(it) }
-        }
-        return decodeJsResult(raw)
-            ?: throw IllegalStateException("Extractor returned nothing on ${webView.url}")
-    }
-
-    private fun note(message: String) {
+    fun note(message: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
         log.add("$time  $message")
         while (log.size > 60) log.removeAt(0)
@@ -224,13 +172,8 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
     }
 
     private companion object {
-        const val SUBSCRIPTIONS_URL = "https://old.reddit.com/subreddits/mine/?limit=100"
-        const val MAX_PAGES = 10
         const val LOAD_TIMEOUT_MS = 25_000L
         const val SETTLE_MS = 400L
-        const val PAGE_DELAY_MS = 1_500L
         const val REQUEST_GAP_MS = 800L
-        /** A small, static old Reddit page to run requests from. */
-        const val ORIGIN_PAGE = "https://old.reddit.com/robots.txt"
     }
 }
