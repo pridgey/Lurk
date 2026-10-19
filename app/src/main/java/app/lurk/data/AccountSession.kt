@@ -42,7 +42,7 @@ class AccountSession(
     val browser = BrowserController(
         context, profile, scripts, onExternal,
         onNative = { uri -> takeOverFromWeb(uri) },
-        onPageUser = { user -> scope.launch { onPageUser(user) } },
+        onPageUser = { user, loggedIn -> scope.launch { onPageUser(user, loggedIn) } },
     )
 
     /** The back stack; the last entry is on screen. Never empty: the UI reads it on first draw. */
@@ -117,20 +117,16 @@ class AccountSession(
     }
 
     /**
-     * The web view followed a link to something with a native screen. Coming from
-     * sign-in (not on old Reddit yet), the web page is replaced; otherwise the native
-     * screen goes on top so Back returns to the web page.
+     * The web view followed a link to something with a native screen. The native
+     * screen goes on top, so Back returns to the web page.
      */
     private fun takeOverFromWeb(uri: Uri): Boolean {
         val route = Links.route(uri) ?: return false
         if (current !is WebScreen) return false
-        val screen = screenFor(route)
-        if (!Links.isOldReddit(browser.url)) {
-            stack.removeAt(stack.lastIndex)
-            // Most likely just signed in; old Reddit never loaded to report it, so check.
-            requestSync()
-        }
-        push(screen)
+        // Leaving sign-in (not on old Reddit yet): let old Reddit load. Its page reports
+        // who's signed in, and the sync that triggers switches to the native feed.
+        if (!Links.isOldReddit(browser.url)) return false
+        push(screenFor(route))
         return true
     }
 
@@ -154,19 +150,46 @@ class AccountSession(
     }
 
     /** The page reports who's signed in; resync when that changes (login, logout, switch). */
-    private suspend fun onPageUser(user: String?) {
+    private suspend fun onPageUser(user: String?, loggedIn: Boolean) {
+        // Just signed in, by the page's say-so or because this is the end of the sign-in
+        // page: always check, even if the page header didn't give a username.
+        val onSignIn = (current as? WebScreen)?.url == Links.LOGIN
+        if (account?.username == null && (loggedIn || onSignIn)) {
+            lastPageUser = user
+            seenPageUser = true
+            sync()
+            return
+        }
         if (seenPageUser && user.equals(lastPageUser, ignoreCase = true)) return
         seenPageUser = true
         lastPageUser = user
         if (!user.equals(account?.username, ignoreCase = true)) sync()
     }
 
+    /** Set when a sync is asked for while one runs; that one then runs again. */
+    private var resync = false
+
     private suspend fun sync() {
-        if (syncing) return
+        if (syncing) {
+            resync = true // e.g. sign-in finished mid-sync; the running one may be stale
+            return
+        }
         syncing = true
         try {
+            do {
+                resync = false
+                syncOnce()
+            } while (resync)
+        } finally {
+            syncing = false
+        }
+    }
+
+    private suspend fun syncOnce() {
+        try {
             val snap = engine.fetchSession()
-            val user = snap.username
+            // The page header is one way to tell who's signed in; ask Reddit directly too.
+            val user = snap.username ?: api.whoAmI()
 
             if (user != null) {
                 val existing = store.accounts.firstOrNull {
@@ -204,8 +227,6 @@ class AccountSession(
             throw e
         } catch (e: Exception) {
             onMessage("Sync failed: ${e.message}")
-        } finally {
-            syncing = false
         }
     }
 

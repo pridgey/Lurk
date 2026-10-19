@@ -6,6 +6,7 @@
   var link = document.querySelector('#header-bottom-right span.user a');
   return JSON.stringify({
     host: location.host,
+    loggedIn: loggedIn,
     username: loggedIn && link ? link.textContent.trim() : null
   });
 })();

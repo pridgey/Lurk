@@ -22,8 +22,11 @@ class BrowserController(
     private val onExternal: (Uri) -> Unit,
     /** Offered links the app can show natively; returns true if it took over. */
     private val onNative: (Uri) -> Boolean,
-    /** Called after each old Reddit page loads with the username the page shows (null = signed out). */
-    private val onPageUser: (String?) -> Unit,
+    /**
+     * Called after each old Reddit page loads with the username the page shows (null if
+     * none) and whether the page says someone is signed in.
+     */
+    private val onPageUser: (username: String?, loggedIn: Boolean) -> Unit,
 ) {
     val webView: WebView = WebSetup.create(context, profile, scripts)
 
@@ -77,7 +80,7 @@ class BrowserController(
                 view.evaluateJavascript(scripts.skin, null)
                 view.evaluateJavascript(scripts.whoami) { raw ->
                     val result = decodeJsResult(raw) ?: return@evaluateJavascript
-                    onPageUser(result.optNullableString("username"))
+                    onPageUser(result.optNullableString("username"), result.optBoolean("loggedIn"))
                 }
             }
 

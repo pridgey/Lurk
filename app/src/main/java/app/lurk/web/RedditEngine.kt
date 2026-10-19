@@ -111,10 +111,9 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
 
             if (page == 0) {
                 username = result.optNullableString("username")
-                if (username == null) {
-                    note("Not signed in (landed on $landed)")
-                    break
-                }
+                // Keep reading anyway: the header may have changed while the list still works,
+                // and the app double-checks who's signed in another way.
+                if (username == null) note("No username in page header (landed on $landed)")
             }
 
             val found = result.optJSONArray("subreddits") ?: JSONArray()

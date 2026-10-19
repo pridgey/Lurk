@@ -96,6 +96,13 @@ class RedditApi(private val engine: RedditEngine) {
         check(result)
     }
 
+    /** The signed-in username, or null when signed out. */
+    suspend fun whoAmI(): String? = try {
+        getObject("/api/me.json").optJSONObject("data")?.optString("name")?.takeIf { it.isNotBlank() }
+    } catch (e: RedditException) {
+        null // signed-out visitors get sent to the login page
+    }
+
     private suspend fun fetchModhash(): String {
         val me = getObject("/api/me.json")
         return me.optJSONObject("data")?.optString("modhash")?.takeIf { it.isNotBlank() }

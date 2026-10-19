@@ -26,7 +26,7 @@ Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see
 - **Feeds or threads show an error:** Engine debug lists each request the engine made, its HTTP status, and the start of the last response. Reddit's JSON format rarely changes; the parsing lives in `data/Models.kt` and is covered by `app/src/test/.../ParseTest.kt`.
 - **Subreddit bar is empty but you're signed in:** the subscription selectors in `assets/engine/session.js` no longer match. In a desktop browser, open `old.reddit.com/subreddits/mine`, save the page (Ctrl+S, "Web page, HTML only"), and share it along with the Engine debug output.
 - **Pages look wrong:** adjust `assets/skin/skin.css`. It's plain CSS against old Reddit's markup; testing changes in a desktop browser with the Stylus extension first is fastest.
-- **Signed-in state not detected:** check `assets/engine/whoami.js`, which reads the username from old Reddit's header.
+- **Signed-in state not detected:** check `assets/engine/whoami.js`, which reads the username from old Reddit's header. Syncs also ask `/api/me.json` when the header gives no username, and Engine debug notes when that happened.
 
 ## Layout
 
