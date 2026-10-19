@@ -3,6 +3,8 @@
 // __LURK_CSS__ is replaced with the contents of skin.css by Scripts.kt.
 (function () {
   if (window.__lurkSkin) return;
+  // Old Reddit's login page is new-style Reddit; the skin would only get in its way.
+  if (/^\/(login|register|account)/.test(location.pathname)) return;
   var css = __LURK_CSS__;
 
   function apply() {

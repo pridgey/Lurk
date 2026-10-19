@@ -8,7 +8,11 @@ object Links {
     const val OLD_ORIGIN = "https://old.reddit.com"
     const val HOME = "https://old.reddit.com/"
     const val INBOX = "https://old.reddit.com/message/inbox/"
-    const val LOGIN = "https://www.reddit.com/login/?dest=https%3A%2F%2Fold.reddit.com%2F"
+    /**
+     * Sign in on old Reddit's own login page. Old Reddit sends signed-out visitors there
+     * (/login?reason=lor2), and a sign-in on www.reddit.com doesn't carry over to it.
+     */
+    const val LOGIN = "https://old.reddit.com/login/?dest=https%3A%2F%2Fold.reddit.com%2F"
 
     fun subreddit(name: String) = "https://old.reddit.com/r/$name/"
 
@@ -47,6 +51,14 @@ object Links {
 
     fun isOldReddit(url: String?): Boolean =
         url != null && Uri.parse(url).host.equals(OLD_HOST, ignoreCase = true)
+
+    private val signInPaths = listOf("/login", "/register", "/account")
+
+    /** Reddit's (new-style) sign-in pages, on any Reddit host, old.reddit.com included. */
+    fun isSignInPage(url: String?): Boolean {
+        val path = url?.let { Uri.parse(it).path } ?: return false
+        return signInPaths.any { path.startsWith(it) }
+    }
 
     fun decide(uri: Uri): Decision {
         val scheme = uri.scheme?.lowercase() ?: return Decision.Stay
@@ -131,9 +143,8 @@ object Links {
         val host = uri.host?.lowercase().orEmpty()
         val seg = uri.pathSegments
 
-        if (host != OLD_HOST) {
-            return Location(if (seg.firstOrNull() == "login") "Sign in" else host.removePrefix("www."))
-        }
+        if (isSignInPage(url)) return Location("Sign in")
+        if (host != OLD_HOST) return Location(host.removePrefix("www."))
         return when {
             seg.isEmpty() || seg[0] in homeSorts -> Location("Home", isHome = true)
             seg[0] == "r" && seg.size >= 2 -> Location("r/${seg[1]}", subreddit = seg[1].lowercase())

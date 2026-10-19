@@ -75,7 +75,8 @@ class BrowserController(
                     view.clearHistory()
                     canGoBack = false
                 }
-                if (!Links.isOldReddit(url)) return
+                // Old Reddit's login page is new-style Reddit: no skin, and nobody to report yet.
+                if (!Links.isOldReddit(url) || Links.isSignInPage(url)) return
                 // Fallback for WebViews without document-start scripts; a no-op otherwise.
                 view.evaluateJavascript(scripts.skin, null)
                 view.evaluateJavascript(scripts.whoami) { raw ->

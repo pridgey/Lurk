@@ -123,9 +123,9 @@ class AccountSession(
     private fun takeOverFromWeb(uri: Uri): Boolean {
         val route = Links.route(uri) ?: return false
         if (current !is WebScreen) return false
-        // Leaving sign-in (not on old Reddit yet): let old Reddit load. Its page reports
-        // who's signed in, and the sync that triggers switches to the native feed.
-        if (!Links.isOldReddit(browser.url)) return false
+        // Leaving sign-in: let old Reddit load. Its page reports who's signed in, and the
+        // sync that triggers switches to the native feed.
+        if (!Links.isOldReddit(browser.url) || Links.isSignInPage(browser.url)) return false
         push(screenFor(route))
         return true
     }

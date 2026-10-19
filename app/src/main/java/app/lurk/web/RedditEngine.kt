@@ -98,6 +98,11 @@ class RedditEngine(context: Context, profile: String?, private val scripts: Scri
 
     private suspend fun doFetchSession(): SessionSnapshot {
         note("Sync started")
+        // Names only: enough to see whether the login cookie is there, without exposing it.
+        val cookieNames = WebProfiles.cookiesOf(webView).getCookie(Links.OLD_ORIGIN).orEmpty()
+            .split(';').map { it.substringBefore('=').trim() }.filter { it.isNotEmpty() }
+        note("Cookies: ${cookieNames.joinToString().ifEmpty { "none" }}")
+        note("Login cookie (reddit_session): ${if ("reddit_session" in cookieNames) "present" else "missing"}")
         var next: String? = SUBSCRIPTIONS_URL
         var username: String? = null
         var matched = 0

@@ -33,6 +33,11 @@ object WebProfiles {
         return WebViewCompat.getProfile(webView).cookieManager
     }
 
+    /** The cookie jar [webView] uses (its profile's, or the default one). */
+    @SuppressLint("RequiresFeature")
+    fun cookiesOf(webView: WebView): CookieManager =
+        if (supported) WebViewCompat.getProfile(webView).cookieManager else CookieManager.getInstance()
+
     /**
      * Signs a profile out by clearing its cookies and storage, then deletes it once
      * its WebViews are gone. With no profile support this wipes the default profile.
