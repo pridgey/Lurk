@@ -308,6 +308,29 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         ImageViewer(url, onClose = { session.viewingImage = null })
     }
 
+    session.playingFile?.let { stream ->
+        VideoPlayer(
+            stream,
+            onClose = { session.playingFile = null },
+            onOpenOnWeb = {
+                session.playingFile = null
+                stream.mp4Url?.let { openExternal(context, Uri.parse(it)) }
+            },
+        )
+    }
+
+    session.sheetUrl?.let { url ->
+        VideoSheet(
+            url,
+            isolateScript = session.scripts.isolate,
+            onClose = { session.sheetUrl = null },
+            onOpenOutside = { uri ->
+                session.sheetUrl = null
+                openExternal(context, uri)
+            },
+        )
+    }
+
     session.playingVideo?.let { post ->
         val media = post.media as? PostMedia.Video
         val stream = media?.stream

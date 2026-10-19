@@ -27,7 +27,7 @@ class AccountSession(
     context: Context,
     private val store: AccountStore,
     val accountId: String,
-    scripts: Scripts,
+    val scripts: Scripts,
     private val onMessage: (String) -> Unit,
     private val onExternal: (Uri) -> Unit,
     /** Open on the sign-in page (a just-added account) instead of the front page. */
@@ -58,16 +58,22 @@ class AccountSession(
     /** A post whose video is open in the full-screen player. */
     var playingVideo by mutableStateOf<Post?>(null)
 
+    /** A linked video file open in the full-screen player. */
+    var playingFile by mutableStateOf<VideoStream?>(null)
+
+    /** A video page open in the video sheet. */
+    var sheetUrl by mutableStateOf<String?>(null)
+
     /**
      * Plays a post's video here: natively if Reddit hosts a copy, else in its site's
-     * embedded player; failing both, hands it to the site.
+     * embedded player; failing both, in the video sheet.
      */
     fun openVideo(post: Post) {
         val media = post.media as? PostMedia.Video ?: return
         when {
             media.stream != null || media.embed != null -> playingVideo = post
             Links.isRedditHost(Uri.parse(post.url).host.orEmpty()) -> openWeb(Links.webOrigin + post.permalink)
-            else -> openLink(post.url) // e.g. YouTube: its app or a Custom Tab
+            else -> sheetUrl = post.url // no player to embed: the page, trimmed to its video
         }
     }
 
@@ -118,6 +124,14 @@ class AccountSession(
         }
         if (Links.isImage(uri)) {
             viewingImage = uri.toString()
+            return
+        }
+        Links.directVideo(uri)?.let { (file, gifLike) ->
+            playingFile = VideoStream(hlsUrl = null, mp4Url = file, width = 0, height = 0, durationSec = 0, isGif = gifLike)
+            return
+        }
+        if (Links.isVideoPage(uri)) {
+            sheetUrl = uri.toString()
             return
         }
         when (val decision = Links.decide(uri)) {

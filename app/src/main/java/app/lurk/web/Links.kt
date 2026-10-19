@@ -147,6 +147,38 @@ object Links {
         return host in imageHosts && imageExtensions.any { path.endsWith(it) }
     }
 
+    private val videoFileExtensions = listOf(".mp4", ".webm", ".m4v", ".mov")
+
+    /**
+     * A link straight to a video file Lurk's own player can play, or null.
+     * Imgur's .gifv pages have an .mp4 twin. Returns the file URL and whether it's GIF-like.
+     */
+    fun directVideo(uri: Uri): Pair<String, Boolean>? {
+        val host = uri.host?.lowercase() ?: return null
+        val path = uri.path?.lowercase() ?: return null
+        if (host.endsWith("imgur.com") && path.endsWith(".gifv")) {
+            return uri.toString().replaceFirst(Regex("\\.gifv", RegexOption.IGNORE_CASE), ".mp4") to true
+        }
+        val scheme = uri.scheme?.lowercase()
+        if ((scheme == "http" || scheme == "https") && videoFileExtensions.any { path.endsWith(it) }) {
+            return uri.toString() to false
+        }
+        return null
+    }
+
+    private val videoSites = listOf(
+        "youtube.com", "youtu.be", "vimeo.com", "twitch.tv", "streamable.com", "tiktok.com",
+        "dailymotion.com", "dai.ly", "rumble.com", "kick.com", "bilibili.com", "odysee.com",
+    )
+
+    /** A page on a video site, shown in the video sheet rather than a Custom Tab. */
+    fun isVideoPage(uri: Uri): Boolean {
+        val host = uri.host?.lowercase() ?: return false
+        if (videoSites.none { host == it || host.endsWith(".$it") }) return false
+        // Site home pages and channel listings aren't a single video.
+        return (uri.path ?: "/").trim('/').isNotEmpty()
+    }
+
     /** What the user is looking at, for the title bar and the selected chip. */
     data class Location(
         val label: String,
