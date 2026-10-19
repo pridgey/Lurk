@@ -58,6 +58,47 @@ class ParseTest {
     }
 
     @Test
+    fun redditVideoHasStreams() {
+        val post = Parse.post(JSONObject(postJson(""",
+            "is_video":true,"post_hint":"hosted:video",
+            "secure_media":{"reddit_video":{"hls_url":"https://v.redd.it/v/HLSPlaylist.m3u8?a=1",
+              "fallback_url":"https://v.redd.it/v/DASH_720.mp4?source=fallback",
+              "width":1280,"height":720,"duration":42,"is_gif":false}},
+            "preview":{"images":[{"source":{"url":"https://preview.redd.it/v.jpg","width":1280,"height":720},"resolutions":[]}]}""")))
+        val video = post.media as PostMedia.Video
+        assertEquals("https://v.redd.it/v/HLSPlaylist.m3u8?a=1", video.stream?.hlsUrl)
+        assertEquals("https://v.redd.it/v/DASH_720.mp4?source=fallback", video.stream?.mp4Url)
+        assertEquals(42, video.stream?.durationSec)
+        assertEquals("https://preview.redd.it/v.jpg", video.preview?.url)
+    }
+
+    @Test
+    fun crosspostedVideoComesFromParent() {
+        val post = Parse.post(JSONObject(postJson(""",
+            "crosspost_parent_list":[{"is_video":true,"secure_media":{"reddit_video":
+              {"hls_url":"https://v.redd.it/p/HLSPlaylist.m3u8","fallback_url":null,"width":10,"height":10,"duration":3,"is_gif":true}}}]""")))
+        val stream = (post.media as PostMedia.Video).stream!!
+        assertEquals("https://v.redd.it/p/HLSPlaylist.m3u8", stream.hlsUrl)
+        assertNull(stream.mp4Url)
+        assertTrue(stream.isGif)
+    }
+
+    @Test
+    fun gifvLinkUsesRedditsConversion() {
+        val post = Parse.post(JSONObject(postJson(""",
+            "post_hint":"link",
+            "preview":{"images":[],"reddit_video_preview":{"fallback_url":"https://v.redd.it/g/DASH_480.mp4",
+              "hls_url":"https://v.redd.it/g/HLSPlaylist.m3u8","width":480,"height":480,"duration":5,"is_gif":true}}""")))
+        assertTrue((post.media as PostMedia.Video).stream!!.isGif)
+    }
+
+    @Test
+    fun youtubeHasNoStream() {
+        val post = Parse.post(JSONObject(postJson(""","post_hint":"rich:video"""")))
+        assertNull((post.media as PostMedia.Video).stream)
+    }
+
+    @Test
     fun linkPostKeepsThumbnail() {
         val post = Parse.post(JSONObject(postJson(""","post_hint":"link"""")))
         assertNull(post.media)

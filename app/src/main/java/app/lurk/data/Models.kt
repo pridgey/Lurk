@@ -8,11 +8,25 @@ data class Picture(val url: String, val fullUrl: String, val width: Int, val hei
     val aspect: Float get() = if (width > 0 && height > 0) width.toFloat() / height else 1.5f
 }
 
+/**
+ * A video Reddit hosts or has converted: [hlsUrl] carries sound, [mp4Url] is a
+ * video-only fallback. [isGif] clips are silent and loop.
+ */
+data class VideoStream(
+    val hlsUrl: String?,
+    val mp4Url: String?,
+    val width: Int,
+    val height: Int,
+    val durationSec: Int,
+    val isGif: Boolean,
+)
+
 /** The big media shown with a post. Plain links use [Post.thumbnail] instead. */
 sealed interface PostMedia {
     data class Image(val picture: Picture) : PostMedia
     data class Gallery(val pictures: List<Picture>) : PostMedia
-    data class Video(val preview: Picture?) : PostMedia
+    /** [stream] is null for videos only their own site can play (e.g. YouTube). */
+    data class Video(val preview: Picture?, val stream: VideoStream?) : PostMedia
 }
 
 data class Post(
@@ -226,11 +240,32 @@ object Parse {
             }
         }
         val hint = d.optString("post_hint")
-        if (d.optBoolean("is_video") || hint == "hosted:video" || hint == "rich:video") {
-            return PostMedia.Video(previewPicture(d))
+        // Reddit's own upload, or the MP4 Reddit makes of GIFs and Imgur .gifv links.
+        val hosted = (d.optJSONObject("secure_media") ?: d.optJSONObject("media"))?.optJSONObject("reddit_video")
+        val converted = d.optJSONObject("preview")?.optJSONObject("reddit_video_preview")
+        if (d.optBoolean("is_video") || hint == "hosted:video") {
+            return PostMedia.Video(previewPicture(d), (hosted ?: converted)?.let(::videoStream))
+        }
+        if (hint == "rich:video") return PostMedia.Video(previewPicture(d), converted?.let(::videoStream))
+        if (converted != null && hint != "image") {
+            return PostMedia.Video(previewPicture(d), videoStream(converted))
         }
         if (hint == "image") return previewPicture(d)?.let { PostMedia.Image(it) }
         return null
+    }
+
+    private fun videoStream(v: JSONObject): VideoStream? {
+        val hls = v.str("hls_url")
+        val mp4 = v.str("fallback_url")
+        if (hls == null && mp4 == null) return null
+        return VideoStream(
+            hlsUrl = hls,
+            mp4Url = mp4,
+            width = v.optInt("width"),
+            height = v.optInt("height"),
+            durationSec = v.optInt("duration"),
+            isGif = v.optBoolean("is_gif"),
+        )
     }
 
     private fun previewPicture(d: JSONObject): Picture? {

@@ -61,6 +61,8 @@ class ScreenshotTest {
             selftext = "Share what you're working on, ask for feedback, or just say hi. Be kind and keep it constructive.",
             stickied = true, flair = "Discussion"),
         post("a2", "Sunrise over the Dolomites after a 4am hike", "EarthPorn", 18432, 412, 5, media = PostMedia.Image(pic), likes = true),
+        post("v1", "Timelapse of a storm rolling over the plains", "videos", 3204, 98, 6,
+            media = PostMedia.Video(pic, app.lurk.data.VideoStream("https://v.redd.it/x.m3u8", null, 1920, 1080, 83, false))),
         post("a3", "Jetpack Compose 2.0 roadmap announced", "androiddev", 1290, 233, 8,
             thumbnail = "https://x/t.jpg", domain = "android-developers.googleblog.com", flair = "News"),
         post("a4", "My grandfather's workshop, untouched since 1987", "pics", 9021, 301, 11,

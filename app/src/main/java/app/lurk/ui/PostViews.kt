@@ -64,8 +64,10 @@ class PostHandlers(
     val openImage: (String) -> Unit,
     val openSubreddit: (String) -> Unit,
     val openUser: (String) -> Unit,
-    /** Reddit's own page for the post, for video playback. */
+    /** Reddit's own page for the post. */
     val openOnWeb: (Post) -> Unit,
+    /** Plays the post's video full screen, or sends it to the site it's from. */
+    val openVideo: (Post) -> Unit,
     val share: (Post) -> Unit,
 )
 
@@ -303,7 +305,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
         is PostMedia.Video -> Box(modifier, contentAlignment = Alignment.Center) {
             val preview = media.preview
             if (preview != null) {
-                PictureView(preview, Modifier) { on.openOnWeb(post) }
+                PictureView(preview, Modifier) { on.openVideo(post) }
             } else {
                 Box(
                     Modifier
@@ -311,11 +313,31 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
                         .aspectRatio(16f / 9f)
                         .clip(MediaShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                        .clickable { on.openOnWeb(post) },
+                        .clickable { on.openVideo(post) },
                 )
             }
             Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White) {
                 Icon(Icons.Default.PlayArrow, "Play video", Modifier.padding(12.dp).size(30.dp))
+            }
+            val stream = media.stream
+            val badge = when {
+                stream == null -> post.domain.removePrefix("www.")
+                stream.isGif -> "GIF"
+                stream.durationSec > 0 -> duration(stream.durationSec)
+                else -> null
+            }
+            if (badge != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.55f),
+                    contentColor = Color.White,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+                        if (stream == null) Icon(LurkIcons.External, null, Modifier.padding(end = 5.dp).size(13.dp))
+                        Text(badge, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    }
+                }
             }
         }
         is PostMedia.Gallery -> if (compact) {

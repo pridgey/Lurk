@@ -39,6 +39,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import app.lurk.data.Post
+import app.lurk.data.PostMedia
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AccountCircle
@@ -147,6 +148,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
             openUser = { name -> session.openWeb(Links.user(name)) },
             openOnWeb = { post -> session.openWeb(Links.webOrigin + post.permalink) },
             share = { post -> sharePost(context, post) },
+            openVideo = { post -> session.openVideo(post) },
         )
     }
 
@@ -304,6 +306,19 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
 
     session.viewingImage?.let { url ->
         ImageViewer(url, onClose = { session.viewingImage = null })
+    }
+
+    session.playingVideo?.let { post ->
+        (post.media as? PostMedia.Video)?.stream?.let { stream ->
+            VideoPlayer(
+                stream,
+                onClose = { session.playingVideo = null },
+                onOpenOnWeb = {
+                    session.playingVideo = null
+                    session.openWeb(Links.webOrigin + post.permalink)
+                },
+            )
+        }
     }
 
     if (confirmSignOut) {
