@@ -26,7 +26,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import app.lurk.data.InlineGif
+import app.lurk.data.InlineImage
 import coil.compose.AsyncImage
 
 /** "3h", "2d", "5mo" since a Unix time in seconds. */
@@ -81,30 +81,31 @@ fun HtmlText(
     Text(text, modifier = modifier, style = style)
 }
 
-/** A piece of a comment body: rendered markdown, or a GIF shown in its place. */
+/** A piece of a comment body: rendered markdown, or an image shown in its place. */
 sealed interface BodyPart {
     data class Html(val html: String) : BodyPart
-    data class Gif(val url: String, val width: Int, val height: Int) : BodyPart
+    data class Image(val url: String, val fullUrl: String, val width: Int, val height: Int) : BodyPart
 }
 
 private val anchor = Regex("""<a\s[^>]*?href="([^"]*)"[^>]*>.*?</a>""", RegexOption.DOT_MATCHES_ALL)
-private val gifLinkHosts = setOf("i.redd.it", "i.imgur.com", "media.giphy.com")
 private val tag = Regex("<[^>]*>")
+private val directImageHosts = setOf("i.redd.it", "i.imgur.com")
+private val directImageExtensions = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif")
 
 /**
- * Splits [html] at links to its embedded [gifs] (and direct .gif links on image hosts),
- * so each GIF shows where it was linked. Embedded GIFs the body never links to go at the end.
+ * Splits [html] at links to its embedded [images] (and direct image links on image hosts),
+ * so each image shows where it was linked. Embedded images the body never links to go at the end.
  */
-fun splitGifs(html: String, gifs: List<InlineGif>): List<BodyPart> {
+fun splitImages(html: String, images: List<InlineImage>): List<BodyPart> {
     val parts = mutableListOf<BodyPart>()
-    val shown = mutableSetOf<InlineGif>()
+    val shown = mutableSetOf<InlineImage>()
     var last = 0
     for (m in anchor.findAll(html)) {
         val href = m.groupValues[1].replace("&amp;", "&")
-        val embedded = gifs.firstOrNull { it.token.isNotEmpty() && href.contains(it.token) }
+        val embedded = images.firstOrNull { it.token.isNotEmpty() && href.contains(it.token) }
         val part = when {
-            embedded != null -> BodyPart.Gif(embedded.url, embedded.width, embedded.height).also { shown += embedded }
-            isDirectGif(href) -> BodyPart.Gif(href, 0, 0)
+            embedded != null -> embedded.part().also { shown += embedded }
+            isDirectImage(href) -> BodyPart.Image(href, href, 0, 0)
             else -> continue
         }
         parts += BodyPart.Html(html.substring(last, m.range.first))
@@ -112,25 +113,30 @@ fun splitGifs(html: String, gifs: List<InlineGif>): List<BodyPart> {
         last = m.range.last + 1
     }
     parts += BodyPart.Html(html.substring(last))
-    gifs.filter { it !in shown }.forEach { parts += BodyPart.Gif(it.url, it.width, it.height) }
+    images.filter { it !in shown }.forEach { parts += it.part() }
     return parts.filter { it !is BodyPart.Html || tag.replace(it.html, "").replace("&nbsp;", "").isNotBlank() }
 }
 
-private fun isDirectGif(href: String): Boolean {
+private fun InlineImage.part() = BodyPart.Image(url, fullUrl, width, height)
+
+private fun isDirectImage(href: String): Boolean {
     val m = Regex("""^https?://([^/?#]+)(/[^?#]*)""").find(href) ?: return false
-    return m.groupValues[1].lowercase() in gifLinkHosts && m.groupValues[2].lowercase().endsWith(".gif")
+    val host = m.groupValues[1].lowercase()
+    val path = m.groupValues[2].lowercase()
+    return (host in directImageHosts && directImageExtensions.any { path.endsWith(it) }) ||
+        (host == "media.giphy.com" && path.endsWith(".gif"))
 }
 
-/** A comment body with its GIFs playing inline. Tapping a GIF opens it full screen. */
+/** A comment body with its images and GIFs shown inline. Tapping one opens it full screen. */
 @Composable
 fun CommentBody(
     html: String,
-    gifs: List<InlineGif>,
+    images: List<InlineImage>,
     onLink: (String) -> Unit,
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
 ) {
-    val parts = remember(html, gifs) { splitGifs(html, gifs) }
+    val parts = remember(html, images) { splitImages(html, images) }
     if (parts.size == 1 && parts[0] is BodyPart.Html) {
         HtmlText(html, onLink, modifier, style)
         return
@@ -139,9 +145,9 @@ fun CommentBody(
         for (part in parts) {
             when (part) {
                 is BodyPart.Html -> HtmlText(part.html, onLink, style = style)
-                is BodyPart.Gif -> AsyncImage(
+                is BodyPart.Image -> AsyncImage(
                     model = part.url,
-                    contentDescription = "GIF",
+                    contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxWidth(0.75f)
@@ -151,7 +157,7 @@ fun CommentBody(
                             else Modifier.heightIn(min = 48.dp),
                         )
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { onLink(part.url) },
+                        .clickable { onLink(part.fullUrl) },
                 )
             }
         }

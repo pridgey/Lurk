@@ -77,10 +77,11 @@ sealed interface ThreadItem {
 }
 
 /**
- * A GIF embedded in a comment. [id] is its media_metadata key: an upload's media id,
- * or "giphy|<id>" / "giphy|<id>|downsized" for Giphy.
+ * An image or GIF embedded in a comment. [id] is its media_metadata key: an upload's media id,
+ * or "giphy|<id>" / "giphy|<id>|downsized" for Giphy. [url] is sized for the thread,
+ * [fullUrl] for the full-screen viewer.
  */
-data class InlineGif(val id: String, val url: String, val width: Int, val height: Int) {
+data class InlineImage(val id: String, val url: String, val fullUrl: String, val width: Int, val height: Int) {
     /** What the body's link to this GIF contains: the bare upload or Giphy id. */
     val token: String get() = if (id.startsWith("giphy|")) id.split('|')[1] else id
 }
@@ -101,8 +102,8 @@ data class Comment(
     /** "moderator", "admin" or null. */
     val distinguished: String?,
     val flair: String?,
-    /** Animated GIFs embedded in the body (Giphy or uploads), from media_metadata. */
-    val gifs: List<InlineGif> = emptyList(),
+    /** Images and GIFs embedded in the body (uploads or Giphy), from media_metadata. */
+    val images: List<InlineImage> = emptyList(),
 ) : ThreadItem {
     override val key: String get() = name
 }
@@ -204,7 +205,7 @@ object Parse {
                 stickied = d.optBoolean("stickied"),
                 distinguished = d.str("distinguished"),
                 flair = d.str("author_flair_text"),
-                gifs = commentGifs(d),
+                images = commentImages(d),
             )
             "more" -> {
                 val ids = d.optJSONArray("children") ?: JSONArray()
@@ -339,14 +340,17 @@ object Parse {
         return Picture(mid?.str("u") ?: full, full, s.optInt("x"), s.optInt("y"))
     }
 
-    private fun commentGifs(d: JSONObject): List<InlineGif> {
+    private fun commentImages(d: JSONObject): List<InlineImage> {
         val meta = d.optJSONObject("media_metadata") ?: return emptyList()
         return meta.keys().asSequence().mapNotNull { key ->
             val m = meta.optJSONObject(key) ?: return@mapNotNull null
-            if (m.optString("status") != "valid" || m.optString("e") != "AnimatedImage") return@mapNotNull null
+            if (m.optString("status") != "valid") return@mapNotNull null
             val s = m.optJSONObject("s") ?: return@mapNotNull null
-            val gif = s.str("gif") ?: return@mapNotNull null
-            InlineGif(key, gif, s.optInt("x"), s.optInt("y"))
+            when (m.optString("e")) {
+                "AnimatedImage" -> s.str("gif")?.let { InlineImage(key, it, it, s.optInt("x"), s.optInt("y")) }
+                "Image" -> galleryPicture(m)?.let { InlineImage(key, it.url, it.fullUrl, it.width, it.height) }
+                else -> null
+            }
         }.toList()
     }
 

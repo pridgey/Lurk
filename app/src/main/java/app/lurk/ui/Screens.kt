@@ -286,7 +286,7 @@ private fun CommentRow(
                 if (!collapsed) {
                     CommentBody(
                         comment.bodyHtml,
-                        comment.gifs,
+                        comment.images,
                         onLink = onLink,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(start = 30.dp, bottom = 10.dp),

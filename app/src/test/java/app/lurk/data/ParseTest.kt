@@ -164,20 +164,26 @@ class ParseTest {
     }
 
     @Test
-    fun commentKeepsAnimatedGifsOnly() {
+    fun commentKeepsValidImagesAndGifs() {
         val json = JSONObject("""{"kind":"t1","data":{"name":"t1_g","author":"a","body_html":"",
             "parent_id":"t3_abc","created_utc":1,
             "media_metadata":{
               "giphy|AbC123|downsized":{"status":"valid","e":"AnimatedImage","ext":"https://giphy.com/gifs/AbC123",
                 "s":{"gif":"https://external-preview.redd.it/x.gif?s=1","mp4":"https://external-preview.redd.it/x.mp4","x":200,"y":100}},
               "upl0ad":{"status":"valid","e":"AnimatedImage","s":{"gif":"https://i.redd.it/upl0ad.gif","x":10,"y":10}},
-              "still":{"status":"valid","e":"Image","s":{"u":"https://preview.redd.it/still.png","x":10,"y":10}},
-              "broken":{"status":"failed","e":"AnimatedImage"}}}}""")
+              "still":{"status":"valid","e":"Image","s":{"u":"https://preview.redd.it/still.png?s=f","x":2000,"y":1000},
+                "p":[{"u":"https://preview.redd.it/still.png?width=320","x":320,"y":160},
+                     {"u":"https://preview.redd.it/still.png?width=640","x":640,"y":320}]},
+              "broken":{"status":"failed","e":"AnimatedImage"},
+              "vid":{"status":"valid","e":"RedditVideo","s":{"x":1,"y":1}}}}}""")
         val tree = JSONArray("[${listing("""{"kind":"t3","data":${postJson()}}""")}, ${listing(json.toString())}]")
-        val gifs = (Parse.thread(tree, "/r/pics/comments/abc/hello").items.single() as Comment).gifs.sortedBy { it.id }
-        assertEquals(listOf("giphy|AbC123|downsized", "upl0ad"), gifs.map { it.id })
-        assertEquals(listOf("AbC123", "upl0ad"), gifs.map { it.token })
-        assertEquals("https://external-preview.redd.it/x.gif?s=1", gifs[0].url)
-        assertEquals(200 to 100, gifs[0].width to gifs[0].height)
+        val images = (Parse.thread(tree, "/r/pics/comments/abc/hello").items.single() as Comment).images.sortedBy { it.id }
+        assertEquals(listOf("giphy|AbC123|downsized", "still", "upl0ad"), images.map { it.id })
+        assertEquals(listOf("AbC123", "still", "upl0ad"), images.map { it.token })
+        assertEquals("https://external-preview.redd.it/x.gif?s=1", images[0].url)
+        assertEquals(200 to 100, images[0].width to images[0].height)
+        assertEquals("https://preview.redd.it/still.png?width=640", images[1].url)
+        assertEquals("https://preview.redd.it/still.png?s=f", images[1].fullUrl)
+        assertEquals(2000 to 1000, images[1].width to images[1].height)
     }
 }
