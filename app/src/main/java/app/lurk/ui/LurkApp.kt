@@ -30,6 +30,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.width
@@ -134,6 +138,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     val account = session.account ?: return
     val screen = session.current
     var debugOpen by remember { mutableStateOf(false) }
+    var subredditsOpen by remember { mutableStateOf(false) }
     var confirmSignOut by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -182,6 +187,25 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         is FeedScreen -> screen.subreddit
         is ThreadScreen -> screen.post?.subreddit
         is WebScreen -> null
+    }
+
+    val selectedFeed: String? = when (screen) {
+        is FeedScreen -> if (screen.subreddit == null) HOME_KEY else screen.subreddit.lowercase()
+        is ThreadScreen -> screen.post?.subreddit?.lowercase()
+        is WebScreen -> Links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.subreddit }
+    }
+    if (subredditsOpen) {
+        SubredditSheet(
+            subreddits = account.subreddits,
+            selected = selectedFeed,
+            homeKey = HOME_KEY,
+            signedIn = account.username != null,
+            syncing = session.syncing,
+            onHome = { session.reset(session.feed(null)) },
+            onSubreddit = { session.reset(session.feed(it)) },
+            onSignIn = { session.openWeb(Links.LOGIN) },
+            onDismiss = { subredditsOpen = false },
+        )
     }
 
     Scaffold(
@@ -264,15 +288,12 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         bottomBar = {
             SubredditBar(
                 account = account,
-                selected = when (screen) {
-                    is FeedScreen -> if (screen.subreddit == null) HOME_KEY else screen.subreddit.lowercase()
-                    is ThreadScreen -> screen.post?.subreddit?.lowercase()
-                    is WebScreen -> Links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.subreddit }
-                },
+                selected = selectedFeed,
                 syncing = session.syncing,
                 onHome = { session.reset(session.feed(null)) },
                 onSubreddit = { session.reset(session.feed(it)) },
                 onSignIn = { session.openWeb(Links.LOGIN) },
+                onOpenAll = { subredditsOpen = true },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -544,31 +565,59 @@ private fun SubredditBar(
     onHome: () -> Unit,
     onSubreddit: (String) -> Unit,
     onSignIn: () -> Unit,
+    /** Opens the drawer with every subreddit. */
+    onOpenAll: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        LazyRow(
-            modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item(key = "fixed:home") {
-                BarChip("Home", selected == HOME_KEY, onHome) {
-                    Icon(Icons.Default.Home, null, Modifier.size(18.dp))
-                }
+    // A swipe up anywhere on the bar opens the drawer.
+    var dragged by remember { mutableFloatStateOf(0f) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.draggable(
+            orientation = Orientation.Vertical,
+            state = rememberDraggableState { dragged += it },
+            onDragStarted = { dragged = 0f },
+            onDragStopped = { velocity -> if (dragged < -24f || velocity < -600f) onOpenAll() },
+        ),
+    ) {
+        Column(Modifier.navigationBarsPadding()) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClickLabel = "All subreddits", onClick = onOpenAll)
+                    .padding(top = 8.dp, bottom = 2.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(width = 36.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
+                )
             }
-            items(listOf("popular", "all"), key = { "fixed:$it" }) { name ->
-                BarChip(name.replaceFirstChar { it.uppercase() }, selected == name, { onSubreddit(name) }, avatar = name)
-            }
-            when {
-                account.username == null -> item(key = "hint:signin") {
-                    BarChip("Sign in to see your subreddits", false, onSignIn, accent = true)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item(key = "fixed:home") {
+                    BarChip("Home", selected == HOME_KEY, onHome) {
+                        Icon(Icons.Default.Home, null, Modifier.size(18.dp))
+                    }
                 }
-                account.subreddits.isEmpty() && syncing -> item(key = "hint:loading") {
-                    BarChip("Loading subscriptions…", false, {})
+                items(listOf("popular", "all"), key = { "fixed:$it" }) { name ->
+                    BarChip(name.replaceFirstChar { it.uppercase() }, selected == name, { onSubreddit(name) }, avatar = name)
                 }
-            }
-            items(account.subreddits, key = { "sub:" + it.lowercase() }) { name ->
-                BarChip(name, selected == name.lowercase(), { onSubreddit(name) }, avatar = name)
+                when {
+                    account.username == null -> item(key = "hint:signin") {
+                        BarChip("Sign in to see your subreddits", false, onSignIn, accent = true)
+                    }
+                    account.subreddits.isEmpty() && syncing -> item(key = "hint:loading") {
+                        BarChip("Loading subscriptions…", false, {})
+                    }
+                }
+                items(account.subreddits, key = { "sub:" + it.lowercase() }) { name ->
+                    BarChip(name, selected == name.lowercase(), { onSubreddit(name) }, avatar = name)
+                }
             }
         }
     }
