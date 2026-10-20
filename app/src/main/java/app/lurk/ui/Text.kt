@@ -88,43 +88,62 @@ sealed interface BodyPart {
 }
 
 private val anchor = Regex("""<a\s[^>]*?href="([^"]*)"[^>]*>.*?</a>""", RegexOption.DOT_MATCHES_ALL)
+private val imgTag = Regex("""<img\s[^>]*?src="([^"]*)"[^>]*>""")
+/** Image markdown Reddit left unrendered, like ![gif](giphy|abc123) or ![img](abc123). */
+private val leftoverMarkdown = Regex("""!\[[^\]]*]\(([^)\s]+)\)""")
 private val tag = Regex("<[^>]*>")
-private val directImageHosts = setOf("i.redd.it", "i.imgur.com")
+private val directImageHosts = setOf("i.redd.it", "preview.redd.it", "external-preview.redd.it", "i.imgur.com")
 private val directImageExtensions = listOf(".jpg", ".jpeg", ".png", ".webp", ".gif")
+private val giphyPage = Regex("""^https?://(?:www\.)?giphy\.com/gifs/(?:[^/?#]*-)?([A-Za-z0-9]+)/?(?:[?#].*)?$""")
+private val giphyRef = Regex("""^giphy\|([A-Za-z0-9]+)""")
 
 /**
  * Splits [html] at links to its embedded [images] (and direct image links on image hosts),
  * so each image shows where it was linked. Embedded images the body never links to go at the end.
+ * Also catches <img> tags and image markdown Reddit didn't render.
  */
 fun splitImages(html: String, images: List<InlineImage>): List<BodyPart> {
+    val matches = (anchor.findAll(html) + imgTag.findAll(html) + leftoverMarkdown.findAll(html))
+        .sortedBy { it.range.first }
     val parts = mutableListOf<BodyPart>()
     val shown = mutableSetOf<InlineImage>()
     var last = 0
-    for (m in anchor.findAll(html)) {
-        val href = m.groupValues[1].replace("&amp;", "&")
-        val embedded = images.firstOrNull { it.token.isNotEmpty() && href.contains(it.token) }
+    for (m in matches) {
+        if (m.range.first < last) continue // inside something already handled, like an <img> in a link
+        val target = m.groupValues[1].replace("&amp;", "&")
+        val embedded = images.firstOrNull { it.token.isNotEmpty() && target.contains(it.token) }
         val part = when {
-            embedded != null -> embedded.part().also { shown += embedded }
-            isDirectImage(href) -> BodyPart.Image(href, href, 0, 0)
-            else -> continue
+            embedded != null -> if (embedded in shown) null else embedded.part().also { shown += embedded }
+            else -> directImage(target)?.let { BodyPart.Image(it, it, 0, 0) }
         }
+        // An <img> inside a link replaces the whole link.
+        val end = if (part != null && m.value.startsWith("<img")) enclosingLinkEnd(html, m.range.last) else m.range.last
+        if (part == null) continue
         parts += BodyPart.Html(html.substring(last, m.range.first))
         parts += part
-        last = m.range.last + 1
+        last = end + 1
     }
     parts += BodyPart.Html(html.substring(last))
     images.filter { it !in shown }.forEach { parts += it.part() }
     return parts.filter { it !is BodyPart.Html || tag.replace(it.html, "").replace("&nbsp;", "").isNotBlank() }
 }
 
+private fun enclosingLinkEnd(html: String, imgEnd: Int): Int {
+    val rest = html.substring(imgEnd + 1)
+    return if (rest.trimStart().startsWith("</a>", ignoreCase = true)) imgEnd + 1 + rest.indexOf("</a>") + 3 else imgEnd
+}
+
 private fun InlineImage.part() = BodyPart.Image(url, fullUrl, width, height)
 
-private fun isDirectImage(href: String): Boolean {
-    val m = Regex("""^https?://([^/?#]+)(/[^?#]*)""").find(href) ?: return false
+/** The image file [target] points at, if it's an image host link or a GIPHY page or reference. */
+private fun directImage(target: String): String? {
+    (giphyPage.find(target) ?: giphyRef.find(target))?.let { return "https://media.giphy.com/media/${it.groupValues[1]}/giphy.gif" }
+    val m = Regex("""^https?://([^/?#]+)(/[^?#]*)""").find(target) ?: return null
     val host = m.groupValues[1].lowercase()
     val path = m.groupValues[2].lowercase()
-    return (host in directImageHosts && directImageExtensions.any { path.endsWith(it) }) ||
+    val isImage = (host in directImageHosts && directImageExtensions.any { path.endsWith(it) }) ||
         (host == "media.giphy.com" && path.endsWith(".gif"))
+    return target.takeIf { isImage }
 }
 
 /** A comment body with its images and GIFs shown inline. Tapping one opens it full screen. */

@@ -109,6 +109,7 @@ class RedditApi(private val engine: RedditEngine) {
         val path = permalink.substringBefore('?').substringBefore('#').trimEnd('/')
         val raw = getJson("$path.json?raw_json=1&limit=200&sort=${sort.param}")
         val root = raw as? JSONArray ?: throw RedditException("Reddit didn't send a thread")
+        runCatching { Parse.imageDiagnostics(root) }.getOrNull()?.let(engine::note)
         return Parse.thread(root, path)
     }
 

@@ -149,6 +149,42 @@ object Parse {
         return ThreadData(post, items, isSingleThread = "comments" in segments && afterComments >= 3)
     }
 
+    /**
+     * For the debug panel: how a thread's comment images arrived. Describes the first comment
+     * that looks like it has one, or null if none do.
+     */
+    fun imageDiagnostics(root: JSONArray): String? {
+        var total = 0
+        var withMeta = 0
+        var sample: JSONObject? = null
+        fun walk(children: JSONArray?) {
+            if (children == null) return
+            for (i in 0 until children.length()) {
+                val child = children.optJSONObject(i) ?: continue
+                if (child.optString("kind") != "t1") continue
+                val d = child.optJSONObject("data") ?: continue
+                total++
+                val hasMeta = d.optJSONObject("media_metadata") != null
+                if (hasMeta) withMeta++
+                val body = d.optString("body")
+                val looksLikeImage = hasMeta || listOf("preview.redd.it", "i.redd.it", "giphy", "![").any { it in body }
+                if (sample == null && looksLikeImage) sample = d
+                walk(d.optJSONObject("replies")?.optJSONObject("data")?.optJSONArray("children"))
+            }
+        }
+        walk(root.optJSONObject(1)?.optJSONObject("data")?.optJSONArray("children"))
+        val d = sample ?: return null
+        val meta = d.optJSONObject("media_metadata")
+        val metaInfo = meta?.let { all ->
+            all.keys().asSequence().joinToString { key ->
+                val m = all.optJSONObject(key)
+                "$key(${m?.optString("status")}/${m?.optString("e")}, s=${m?.optJSONObject("s")?.keys()?.asSequence()?.toList()})"
+            }
+        } ?: "none"
+        return "Comment images: $withMeta of $total comments have media_metadata. Sample ${d.optString("name")}: " +
+            "body=${d.optString("body").take(160)} | body_html=${d.optString("body_html").take(300)} | meta=$metaInfo"
+    }
+
     /** Things from /api/morechildren, arranged under [more]'s parent. */
     fun moreChildren(root: JSONObject, more: More, op: String): List<ThreadItem> {
         val things = root.optJSONObject("json")?.optJSONObject("data")?.optJSONArray("things") ?: JSONArray()

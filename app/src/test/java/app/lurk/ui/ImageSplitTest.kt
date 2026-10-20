@@ -50,4 +50,32 @@ class ImageSplitTest {
         assertEquals(listOf(BodyPart.Html("<p>hi</p>"), upload.part()), splitImages("<p>hi</p>", listOf(upload)))
         assertEquals(listOf(BodyPart.Html("<p>hi</p>")), splitImages("<p>hi</p>", emptyList()))
     }
+
+    @Test
+    fun giphyWithoutMetadataUsesGiphysFile() {
+        val gif = BodyPart.Image("https://media.giphy.com/media/AbC123/giphy.gif", "https://media.giphy.com/media/AbC123/giphy.gif", 0, 0)
+        assertEquals(listOf(gif), splitImages("""<p><a href="https://giphy.com/gifs/funny-cat-AbC123">gif</a></p>""", emptyList()))
+        assertEquals(listOf(gif), splitImages("""<p>![gif](giphy|AbC123|downsized)</p>""", emptyList()))
+    }
+
+    @Test
+    fun leftoverMarkdownMatchesMetadata() {
+        val parts = splitImages("""<p>lol ![img](upl0ad)</p>""", listOf(upload))
+        assertEquals(upload.part(), parts[1])
+        assertEquals(2, parts.size)
+    }
+
+    @Test
+    fun imgTagInsideLinkReplacesTheLink() {
+        val html = """<p>a <a href="https://giphy.com/gifs/AbC123"><img src="https://external-preview.redd.it/g.gif" width="200"></a> b</p>"""
+        val parts = splitImages(html, listOf(giphy))
+        assertEquals(listOf("a", "img", "b"), parts.map { if (it is BodyPart.Image) "img" else (it as BodyPart.Html).html.replace(Regex("<[^>]*>"), "").trim() })
+        assertEquals(giphy.part(), parts[1])
+    }
+
+    @Test
+    fun previewLinkWithoutMetadataStillShows() {
+        val url = "https://preview.redd.it/x1.jpeg?width=1080&s=abc"
+        assertEquals(listOf(BodyPart.Image(url, url, 0, 0)), splitImages("""<p><a href="${url.replace("&", "&amp;")}">$url</a></p>""", emptyList()))
+    }
 }
