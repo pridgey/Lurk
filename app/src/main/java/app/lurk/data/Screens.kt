@@ -30,7 +30,12 @@ class FeedScreen(
         private set
     var endReached by mutableStateOf(false)
         private set
-    val listState = LazyListState()
+    /**
+     * Replaced on refresh: a list keeps its place by post, so reusing it would jump to
+     * wherever the post you were on landed in the new results instead of the top.
+     */
+    var listState by mutableStateOf(LazyListState())
+        private set
 
     private var after: String? = null
     private var job: Job? = null
@@ -74,7 +79,7 @@ class FeedScreen(
         endReached = false
         loading = false
         error = null
-        scope.launch { listState.scrollToItem(0) }
+        listState = LazyListState()
         loadMore()
     }
 
