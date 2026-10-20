@@ -72,6 +72,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -132,7 +133,6 @@ fun LurkApp(store: AccountStore) {
     if (store.needsPin(activeId)) {
         val elsewhere = store.elsewhere()
         LockScreen(
-            username = active?.username,
             onLeave = elsewhere?.let { id -> { store.setActive(id) } },
             onUnlock = { pin -> store.unlock(activeId, pin) },
             onForget = { store.forget(activeId) },
@@ -151,7 +151,9 @@ fun LurkApp(store: AccountStore) {
             session.start()
             onDispose { session.destroy() }
         }
-        AccountScreen(store, session, snackbar)
+        CompositionLocalProvider(LocalShowNsfw provides (active?.showNsfw == true)) {
+            AccountScreen(store, session, snackbar)
+        }
     }
 }
 
@@ -534,7 +536,14 @@ private fun AccountMenu(
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             store.accounts.forEach { a ->
                 DropdownMenuItem(
-                    text = { Text(a.username?.let { "u/$it" } ?: "Not signed in") },
+                    text = {
+                        Text(
+                            when {
+                                store.needsPin(a.id) -> "Private account"
+                                else -> a.username?.let { "u/$it" } ?: "Not signed in"
+                            },
+                        )
+                    },
                     leadingIcon = {
                         if (a.id == current.id) Icon(Icons.Default.Check, contentDescription = "Active")
                         else Spacer(Modifier.size(24.dp))
@@ -551,6 +560,14 @@ private fun AccountMenu(
                 )
             }
             HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Show NSFW without tapping") },
+                leadingIcon = {
+                    if (current.showNsfw) Icon(Icons.Default.Check, contentDescription = "On")
+                    else Spacer(Modifier.size(24.dp))
+                },
+                onClick = { open = false; store.update(current.id) { it.copy(showNsfw = !it.showNsfw) } },
+            )
             if (current.username == null) {
                 DropdownMenuItem(text = { Text("Sign in") }, onClick = { open = false; onSignIn() })
             }

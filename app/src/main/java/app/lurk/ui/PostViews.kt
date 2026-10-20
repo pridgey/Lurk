@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +71,9 @@ class PostHandlers(
     val openVideo: (Post) -> Unit,
     val share: (Post) -> Unit,
 )
+
+/** Whether the active account shows NSFW media without a tap. */
+val LocalShowNsfw = compositionLocalOf { false }
 
 private val CardShape = RoundedCornerShape(24.dp)
 private val MediaShape = RoundedCornerShape(16.dp)
@@ -233,7 +237,7 @@ private fun LinkPreview(post: Post, on: PostHandlers) {
             .clickable { on.openLink(post.url) },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
-            val thumb = post.thumbnail?.takeIf { !post.over18 && !post.spoiler }
+            val thumb = post.thumbnail?.takeIf { (!post.over18 || LocalShowNsfw.current) && !post.spoiler }
             Box(
                 Modifier
                     .size(52.dp)
@@ -276,7 +280,8 @@ private fun LinkPreview(post: Post, on: PostHandlers) {
 
 @Composable
 private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: PostHandlers) {
-    var revealed by remember(post.name) { mutableStateOf(!(post.over18 || post.spoiler)) }
+    val showNsfw = LocalShowNsfw.current
+    var revealed by remember(post.name, showNsfw) { mutableStateOf(!((post.over18 && !showNsfw) || post.spoiler)) }
     val modifier = Modifier.padding(top = 10.dp)
     if (!revealed) {
         Box(

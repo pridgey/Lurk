@@ -48,7 +48,6 @@ private const val WAIT_SECONDS = 30
 /** Shown instead of a PIN-locked account until its PIN is entered. */
 @Composable
 fun LockScreen(
-    username: String?,
     /** Null when there's no other account to go to. */
     onLeave: (() -> Unit)?,
     onUnlock: (String) -> Boolean,
@@ -92,7 +91,7 @@ fun LockScreen(
             Icon(Icons.Default.Lock, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(16.dp))
             Text(
-                username?.let { "Enter the PIN for u/$it" } ?: "Enter this account's PIN",
+                "Enter the PIN for this private account",
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Center,
             )

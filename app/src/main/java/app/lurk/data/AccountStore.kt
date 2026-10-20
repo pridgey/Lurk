@@ -24,6 +24,8 @@ data class Account(
     /** Set when switching to this account needs a PIN: a salted PBKDF2 hash, never the PIN itself. */
     val pinHash: String? = null,
     val pinSalt: String? = null,
+    /** Show NSFW media without a tap to reveal. Spoilers still hide. */
+    val showNsfw: Boolean = false,
 ) {
     val locked: Boolean get() = pinHash != null
 }
@@ -155,6 +157,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     syncedAt = o.optLong("syncedAt"),
                     pinHash = o.optString("pinHash").ifBlank { null },
                     pinSalt = o.optString("pinSalt").ifBlank { null },
+                    showNsfw = o.optBoolean("showNsfw"),
                 )
             }
         }.getOrDefault(emptyList())
@@ -170,7 +173,8 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     .put("subreddits", JSONArray(a.subreddits))
                     .put("syncedAt", a.syncedAt)
                     .put("pinHash", a.pinHash ?: "")
-                    .put("pinSalt", a.pinSalt ?: ""),
+                    .put("pinSalt", a.pinSalt ?: "")
+                    .put("showNsfw", a.showNsfw),
             )
         }
         prefs.edit().putString(KEY_ACCOUNTS, arr.toString()).putString(KEY_ACTIVE, activeId).apply()
