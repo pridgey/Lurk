@@ -93,6 +93,16 @@ class ParseTest {
     }
 
     @Test
+    fun gifWithSoundIsFlagged() {
+        val post = Parse.post(JSONObject(postJson(""",
+            "is_video":true,"secure_media":{"reddit_video":{"hls_url":"https://v.redd.it/s/HLSPlaylist.m3u8",
+              "width":10,"height":10,"duration":3,"is_gif":true,"has_audio":true}}""")))
+        val stream = (post.media as PostMedia.Video).stream!!
+        assertTrue(stream.isGif)
+        assertEquals(true, stream.hasAudio)
+    }
+
+    @Test
     fun youtubeHasEmbedButNoStream() {
         val post = Parse.post(JSONObject(postJson(""",
             "post_hint":"rich:video",

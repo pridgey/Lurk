@@ -181,7 +181,8 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
             openUser = { name -> session.openWeb(Links.user(name)) },
             openOnWeb = { post -> session.openWeb(Links.webOrigin + post.permalink) },
             share = { post -> sharePost(context, post) },
-            openVideo = { post -> session.openVideo(post) },
+            openVideo = { post, startMs -> session.openVideo(post, startMs) },
+            inlineVideo = InlineVideo(),
         )
     }
 
@@ -389,6 +390,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         when {
             stream != null -> VideoPlayer(
                 stream,
+                startMs = session.playingVideoStartMs,
                 onClose = { session.playingVideo = null },
                 onOpenOnWeb = {
                     session.playingVideo = null

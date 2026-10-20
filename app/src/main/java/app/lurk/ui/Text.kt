@@ -5,13 +5,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -164,21 +165,38 @@ fun CommentBody(
         for (part in parts) {
             when (part) {
                 is BodyPart.Html -> HtmlText(part.html, onLink, style = style)
-                is BodyPart.Image -> AsyncImage(
-                    model = part.url,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth(0.75f)
-                        .widthIn(max = 280.dp)
-                        .then(
-                            if (part.width > 0 && part.height > 0) Modifier.aspectRatio(part.width.toFloat() / part.height)
-                            else Modifier.heightIn(min = 48.dp),
-                        )
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onLink(part.fullUrl) },
-                )
+                is BodyPart.Image -> InlineBodyImage(part, onLink)
             }
         }
     }
 }
+
+/**
+ * One image in a comment. Shown at least [MinImageWidth] wide (or the comment's width, if
+ * narrower), whatever size the file is. Its shape comes from Reddit's numbers, or from the
+ * file once loaded; very wide or tall images are letterboxed rather than shrunk.
+ */
+@Composable
+private fun InlineBodyImage(part: BodyPart.Image, onLink: (String) -> Unit) {
+    var aspect by remember(part.url) {
+        mutableStateOf(if (part.width > 0 && part.height > 0) part.width.toFloat() / part.height else null)
+    }
+    AsyncImage(
+        model = part.url,
+        contentDescription = null,
+        contentScale = ContentScale.Fit,
+        onSuccess = { state ->
+            val size = state.painter.intrinsicSize
+            if (aspect == null && size.width > 0f && size.height > 0f) aspect = size.width / size.height
+        },
+        modifier = Modifier
+            .fillMaxWidth(0.75f)
+            .widthIn(min = MinImageWidth, max = 280.dp)
+            // Until the shape is known, a square placeholder keeps it from starting tiny.
+            .aspectRatio((aspect ?: 1f).coerceIn(0.6f, 2.5f))
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onLink(part.fullUrl) },
+    )
+}
+
+private val MinImageWidth = 180.dp

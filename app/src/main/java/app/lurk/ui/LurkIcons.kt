@@ -34,6 +34,8 @@ object LurkIcons {
         "M11 4.7a0.7 0.7 0 0 0-1.2-0.5L6.4 7.6A1.4 1.4 0 0 1 5.4 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 0.4l3.4 3.4A0.7 0.7 0 0 0 11 19.3z"
     val Volume = icon("Volume", SPEAKER, "M16 9a5 5 0 0 1 0 6", "M19.4 18.4a9 9 0 0 0 0-12.8")
     val Muted = icon("Muted", SPEAKER, "M22 9l-6 6", "M16 9l6 6")
+    val Fullscreen = icon("Fullscreen", "M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7")
+    val Pause = icon("Pause", "M7 5h3v14H7z", "M14 5h3v14h-3z", filled = true)
 
     private fun icon(name: String, vararg paths: String, filled: Boolean = false): ImageVector {
         val builder = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)

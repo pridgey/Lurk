@@ -10,7 +10,8 @@ data class Picture(val url: String, val fullUrl: String, val width: Int, val hei
 
 /**
  * A video Reddit hosts or has converted: [hlsUrl] carries sound, [mp4Url] is a
- * video-only fallback. [isGif] clips are silent and loop.
+ * video-only fallback. [isGif] clips loop and start muted. Some still carry sound:
+ * [hasAudio] is Reddit's word on that when it gives one, null when it doesn't.
  */
 data class VideoStream(
     val hlsUrl: String?,
@@ -19,6 +20,7 @@ data class VideoStream(
     val height: Int,
     val durationSec: Int,
     val isGif: Boolean,
+    val hasAudio: Boolean? = null,
 )
 
 /** Another site's player, as the iframe HTML Reddit gives for embedding it. */
@@ -347,6 +349,7 @@ object Parse {
             height = v.optInt("height"),
             durationSec = v.optInt("duration"),
             isGif = v.optBoolean("is_gif"),
+            hasAudio = if (v.has("has_audio")) v.optBoolean("has_audio") else null,
         )
     }
 

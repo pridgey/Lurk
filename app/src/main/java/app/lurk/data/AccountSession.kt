@@ -58,6 +58,9 @@ class AccountSession(
     /** A post whose video is open in the full-screen player. */
     var playingVideo by mutableStateOf<Post?>(null)
 
+    /** Where [playingVideo] starts, when it carries on from the in-list player. */
+    var playingVideoStartMs = 0L
+
     /** A linked video file open in the full-screen player. */
     var playingFile by mutableStateOf<VideoStream?>(null)
 
@@ -66,12 +69,15 @@ class AccountSession(
 
     /**
      * Plays a post's video here: natively if Reddit hosts a copy, else in its site's
-     * embedded player; failing both, in the video sheet.
+     * embedded player; failing both, in the video sheet. [startMs] picks up a native video mid-way.
      */
-    fun openVideo(post: Post) {
+    fun openVideo(post: Post, startMs: Long = 0) {
         val media = post.media as? PostMedia.Video ?: return
         when {
-            media.stream != null || media.embed != null -> playingVideo = post
+            media.stream != null || media.embed != null -> {
+                playingVideoStartMs = startMs
+                playingVideo = post
+            }
             Links.isRedditHost(Uri.parse(post.url).host.orEmpty()) -> openWeb(Links.webOrigin + post.permalink)
             else -> sheetUrl = post.url // no player to embed: the page, trimmed to its video
         }

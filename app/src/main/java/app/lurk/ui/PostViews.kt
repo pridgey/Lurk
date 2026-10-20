@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,9 +68,11 @@ class PostHandlers(
     val openUser: (String) -> Unit,
     /** Reddit's own page for the post. */
     val openOnWeb: (Post) -> Unit,
-    /** Plays the post's video full screen, or sends it to the site it's from. */
-    val openVideo: (Post) -> Unit,
+    /** Plays the post's video full screen from a spot (ms), or sends it to the site it's from. */
+    val openVideo: (Post, Long) -> Unit,
     val share: (Post) -> Unit,
+    /** The video playing in place in the list, if any. */
+    val inlineVideo: InlineVideo = InlineVideo(),
 )
 
 /** Whether the active account shows NSFW media without a tap. */
@@ -309,8 +312,28 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
         is PostMedia.Image -> PictureView(media.picture, modifier) { on.openImage(media.picture.fullUrl) }
         is PostMedia.Video -> Box(modifier, contentAlignment = Alignment.Center) {
             val preview = media.preview
+            val stream = media.stream
+            // Reddit-hosted videos play right here; anything else opens its own player.
+            val playHere = { if (stream != null) on.inlineVideo.playing = post.name else on.openVideo(post, 0) }
+            if (stream != null && on.inlineVideo.playing == post.name) {
+                // Same box the preview filled, so the list doesn't jump.
+                val aspect = preview?.aspect ?: if (stream.width > 0 && stream.height > 0) stream.width.toFloat() / stream.height else 16f / 9f
+                InlineVideoPlayer(
+                    stream,
+                    Modifier.fillMaxWidth().aspectRatio(aspect.coerceIn(0.8f, 2.4f)).clip(MediaShape),
+                    onFullscreen = { position ->
+                        on.inlineVideo.playing = null
+                        on.openVideo(post, position)
+                    },
+                )
+                // Scrolled away or left the screen: stop for good rather than restart on return.
+                DisposableEffect(post.name) {
+                    onDispose { if (on.inlineVideo.playing == post.name) on.inlineVideo.playing = null }
+                }
+                return@Box
+            }
             if (preview != null) {
-                PictureView(preview, Modifier) { on.openVideo(post) }
+                PictureView(preview, Modifier, onClick = playHere)
             } else {
                 Box(
                     Modifier
@@ -318,13 +341,12 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
                         .aspectRatio(16f / 9f)
                         .clip(MediaShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                        .clickable { on.openVideo(post) },
+                        .clickable(onClick = playHere),
                 )
             }
             Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.55f), contentColor = Color.White) {
                 Icon(Icons.Default.PlayArrow, "Play video", Modifier.padding(12.dp).size(30.dp))
             }
-            val stream = media.stream
             val badge = when {
                 stream == null -> media.embed?.provider ?: post.domain.removePrefix("www.")
                 stream.isGif -> "GIF"
@@ -342,6 +364,8 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
                         // ↗ marks videos that can only play on their own site.
                         if (stream == null && media.embed == null) Icon(LurkIcons.External, null, Modifier.padding(end = 5.dp).size(13.dp))
                         Text(badge, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                        // 🔊 marks GIFs that have sound.
+                        if (stream?.isGif == true && stream.hasAudio == true) Icon(LurkIcons.Volume, "Has sound", Modifier.padding(start = 5.dp).size(13.dp))
                     }
                 }
             }
