@@ -1,9 +1,11 @@
 package app.lurk.ui
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -116,6 +119,27 @@ fun LurkApp(store: AccountStore) {
     // Each account gets its own session (browser + engine). Switching accounts tears
     // the old one down and builds a new one on that account's WebView profile.
     val activeId = store.activeId
+    val active = store.find(activeId)
+
+    // Keep a PIN account's screens out of the recent-apps preview (and screenshots).
+    val secure = active?.locked == true
+    DisposableEffect(secure) {
+        val window = (context as? Activity)?.window
+        if (secure) window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
+
+    if (store.needsPin(activeId)) {
+        val elsewhere = store.elsewhere()
+        LockScreen(
+            username = active?.username,
+            onLeave = elsewhere?.let { id -> { store.setActive(id) } },
+            onUnlock = { pin -> store.unlock(activeId, pin) },
+            onForget = { store.forget(activeId) },
+        )
+        return
+    }
+
     key(activeId) {
         val session = remember {
             AccountSession(
@@ -140,6 +164,8 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     var debugOpen by remember { mutableStateOf(false) }
     var subredditsOpen by remember { mutableStateOf(false) }
     var confirmSignOut by remember { mutableStateOf(false) }
+    var settingPin by remember { mutableStateOf(false) }
+    var confirmRemovePin by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val onMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
@@ -266,6 +292,8 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                             }
                         },
                         onSignOut = { confirmSignOut = true },
+                        onSetPin = { settingPin = true },
+                        onRemovePin = { confirmRemovePin = true },
                     )
                     OverflowMenu(
                         syncing = session.syncing,
@@ -378,6 +406,32 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         }
     }
 
+    if (settingPin) {
+        SetPinDialog(
+            username = account.username,
+            onSet = { pin ->
+                settingPin = false
+                store.setPin(account.id, pin)
+                onMessage("PIN set. Switching to this account will ask for it.")
+            },
+            onCancel = { settingPin = false },
+        )
+    }
+    if (confirmRemovePin) {
+        AlertDialog(
+            onDismissRequest = { confirmRemovePin = false },
+            title = { Text("Remove the PIN?") },
+            text = { Text("Anyone using this phone will be able to switch to ${account.username?.let { "u/$it" } ?: "this account"}.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemovePin = false
+                    store.clearPin(account.id)
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemovePin = false }) { Text("Cancel") } },
+        )
+    }
+
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
@@ -464,6 +518,8 @@ private fun AccountMenu(
     onSignIn: () -> Unit,
     onAdd: () -> Unit,
     onSignOut: () -> Unit,
+    onSetPin: () -> Unit,
+    onRemovePin: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -483,6 +539,11 @@ private fun AccountMenu(
                         if (a.id == current.id) Icon(Icons.Default.Check, contentDescription = "Active")
                         else Spacer(Modifier.size(24.dp))
                     },
+                    trailingIcon = if (a.locked) {
+                        { Icon(Icons.Default.Lock, contentDescription = "Needs PIN", Modifier.size(18.dp)) }
+                    } else {
+                        null
+                    },
                     onClick = {
                         open = false
                         store.setActive(a.id)
@@ -501,6 +562,11 @@ private fun AccountMenu(
                 )
             }
             if (current.username != null) {
+                DropdownMenuItem(
+                    text = { Text(if (current.locked) "Remove PIN" else "Require PIN to switch here") },
+                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                    onClick = { open = false; if (current.locked) onRemovePin() else onSetPin() },
+                )
                 DropdownMenuItem(
                     text = { Text("Sign out of u/${current.username}") },
                     onClick = { open = false; onSignOut() },
