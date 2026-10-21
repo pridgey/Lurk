@@ -54,6 +54,14 @@ import app.lurk.data.Comment
 import app.lurk.data.FeedScreen
 import app.lurk.data.More
 import app.lurk.data.ThreadScreen
+import android.os.Build
+import android.widget.Toast
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -352,7 +360,7 @@ fun ImageViewer(url: String, preview: String?, onClose: () -> Unit) {
             offset = if (scale == 1f) Offset.Zero else offset + pan
         }
         var full by remember(url) { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
-        Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -385,6 +393,50 @@ fun ImageViewer(url: String, preview: String?, onClose: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
+            }
+            // The full image once it's in, else the copy on screen.
+            val copyUrl = if (full is AsyncImagePainter.State.Success || preview == null) url else preview
+            CopyImageButton(copyUrl, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp))
+        }
+    }
+}
+
+/** Copies the image to the clipboard. Android 13+ confirms copies itself; older versions get a toast. */
+@Composable
+private fun CopyImageButton(url: String, modifier: Modifier) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var copying by remember { mutableStateOf(false) }
+    Surface(
+        shape = CircleShape,
+        color = Color.Black.copy(alpha = 0.55f),
+        contentColor = Color.White,
+        modifier = modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(enabled = !copying, onClickLabel = "Copy image") {
+                copying = true
+                scope.launch {
+                    val ok = try {
+                        ImageClipboard.copy(context, url)
+                        true
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        false
+                    } finally {
+                        copying = false
+                    }
+                    if (!ok) Toast.makeText(context, "Couldn't copy the image", Toast.LENGTH_SHORT).show()
+                    else if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, "Image copied", Toast.LENGTH_SHORT).show()
+                }
+            },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (copying) {
+                CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+            } else {
+                Icon(LurkIcons.Copy, "Copy image", Modifier.size(20.dp))
             }
         }
     }
