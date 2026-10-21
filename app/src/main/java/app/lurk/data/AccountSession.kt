@@ -8,7 +8,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.lurk.web.BrowserController
 import app.lurk.web.Links
-import app.lurk.web.RedditEngine
+import app.lurk.web.RedditLinks
+import app.lurk.web.Route
+import app.lurk.web.Decision
 import app.lurk.web.Scripts
 import app.lurk.web.WebProfiles
 import kotlinx.coroutines.CancellationException
@@ -18,9 +20,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Everything that belongs to one signed-in account while it's the active one:
- * its hidden engine and the native screens it feeds, its fallback web view,
- * and keeping the subscription list in sync.
+ * Everything that belongs to one account while it's the active one: its site's
+ * [Service] and the native screens it feeds, its fallback web view, and keeping
+ * the subscription list in sync.
  * Created when an account becomes active and destroyed when you switch away.
  */
 class AccountSession(
@@ -36,18 +38,29 @@ class AccountSession(
     private val scope = MainScope()
     private val profile = store.profileFor(accountId)
 
-    val engine = RedditEngine(context, profile, scripts)
-    val api = RedditApi(engine)
-    val actions = Actions(api, scope, signedIn = { account?.username != null }, onMessage = onMessage)
+    val service: Service = store.find(accountId).let { a ->
+        when (a?.kind ?: ServiceKind.Reddit) {
+            ServiceKind.Reddit -> RedditService(context, profile, scripts)
+            ServiceKind.Lemmy -> LemmyService(
+                instance = a?.instance.orEmpty(),
+                token = a?.token,
+                onTokenRejected = { onLemmyTokenRejected() },
+            )
+        }
+    }
+    val links get() = service.links
+    val actions = Actions(service, scope, signedIn = { account?.username != null }, onMessage = onMessage)
     val browser = BrowserController(
-        context, profile, scripts, onExternal,
+        context, profile, scripts, service.links, onExternal,
         onNative = { uri -> takeOverFromWeb(uri) },
         onPageUser = { user, loggedIn -> scope.launch { onPageUser(user, loggedIn) } },
         onPageLoaded = { onWebPageLoaded() },
     )
 
     /** The back stack; the last entry is on screen. Never empty: the UI reads it on first draw. */
-    val stack = mutableStateListOf<Screen>(if (signInFirst) WebScreen(Links.LOGIN) else feed(null))
+    val stack = mutableStateListOf<Screen>(
+        (service.signIn as? SignIn.Web)?.takeIf { signInFirst }?.let { WebScreen(it.url) } ?: feed(null),
+    )
     val current: Screen get() = stack.last()
 
     private val syncOnStart = !signInFirst
@@ -67,8 +80,11 @@ class AccountSession(
     /** A video page open in the video sheet. */
     var sheetUrl by mutableStateOf<String?>(null)
 
+    /** Lurk's own sign-in form is open (for sites that use one). */
+    var signingIn by mutableStateOf(false)
+
     /**
-     * Plays a post's video here: natively if Reddit hosts a copy, else in its site's
+     * Plays a post's video here: natively if the site hosts a copy, else in its site's
      * embedded player; failing both, in the video sheet. [startMs] picks up a native video mid-way.
      */
     fun openVideo(post: Post, startMs: Long = 0) {
@@ -78,7 +94,7 @@ class AccountSession(
                 playingVideoStartMs = startMs
                 playingVideo = post
             }
-            Links.isRedditHost(Uri.parse(post.url).host.orEmpty()) -> openWeb(Links.webOrigin + post.permalink)
+            links.isSiteHost(Uri.parse(post.url).host.orEmpty()) -> openWeb(links.thread(post.threadRef))
             else -> sheetUrl = post.url // no player to embed: the page, trimmed to its video
         }
     }
@@ -92,16 +108,25 @@ class AccountSession(
     val account: Account? get() = store.find(accountId)
 
     fun start() {
+        shareLemmyLogin()
         if (syncOnStart) requestSync()
+    }
+
+    /** Lemmy's web pages read the login token from a "jwt" cookie, so web screens are signed in too. */
+    private fun shareLemmyLogin() {
+        val lemmy = service as? LemmyService ?: return
+        val token = lemmy.token ?: return
+        WebProfiles.cookiesOf(browser.webView)
+            .setCookie("https://${lemmy.instance}", "jwt=$token; Path=/; Secure; SameSite=Lax")
     }
 
     // --- Navigation ---
 
-    fun feed(subreddit: String?, sort: FeedSort = FeedSort.Hot): FeedScreen =
-        FeedScreen(subreddit, sort, api, scope).also { it.loadMore() }
+    fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen =
+        FeedScreen(community, sort, service, scope).also { it.loadMore() }
 
-    fun thread(permalink: String, preview: Post? = null): ThreadScreen =
-        ThreadScreen(permalink, preview, api, scope).also { it.load() }
+    fun thread(ref: String, preview: Post? = null): ThreadScreen =
+        ThreadScreen(ref, preview, service, scope).also { it.load() }
 
     fun push(screen: Screen) {
         stack += screen
@@ -113,7 +138,7 @@ class AccountSession(
         return true
     }
 
-    /** Starts over at [screen], as when tapping a subreddit in the bottom bar. */
+    /** Starts over at [screen], as when tapping a community in the bottom bar. */
     fun reset(screen: Screen) {
         stack.clear()
         stack += screen
@@ -123,12 +148,13 @@ class AccountSession(
 
     /** Opens a link from a native screen: natively if possible, else images, web or outside. */
     fun openLink(raw: String) {
-        val uri = Links.resolve(raw)
-        Links.route(uri)?.let {
+        val uri = links.resolve(raw)
+        links.route(uri)?.let {
             push(screenFor(it))
             return
         }
-        if (Links.isImage(uri)) {
+        // Image hosts, and pictrs, the image server Lemmy instances run.
+        if (Links.isImage(uri) || (uri.path.orEmpty().startsWith("/pictrs/image/") && Links.isImageFile(uri))) {
             viewingImage = uri.toString()
             return
         }
@@ -140,17 +166,17 @@ class AccountSession(
             sheetUrl = uri.toString()
             return
         }
-        when (val decision = Links.decide(uri)) {
-            Links.Decision.Stay -> openWeb(uri.toString())
-            is Links.Decision.Rewrite -> openWeb(decision.uri.toString())
-            Links.Decision.External -> onExternal(uri)
-            Links.Decision.Block -> Unit
+        when (val decision = links.decide(uri)) {
+            Decision.Stay -> openWeb(uri.toString())
+            is Decision.Rewrite -> openWeb(decision.uri.toString())
+            Decision.External -> onExternal(uri)
+            Decision.Block -> Unit
         }
     }
 
-    private fun screenFor(route: Links.Route): Screen = when (route) {
-        is Links.Route.Feed -> feed(route.subreddit, FeedSort.of(route.sort, route.time))
-        is Links.Route.Thread -> thread(route.permalink)
+    private fun screenFor(route: Route): Screen = when (route) {
+        is Route.Feed -> feed(route.community, route.sort ?: service.feedSorts.firstOrNull())
+        is Route.Thread -> thread(route.ref)
     }
 
     /**
@@ -158,11 +184,11 @@ class AccountSession(
      * screen goes on top, so Back returns to the web page.
      */
     private fun takeOverFromWeb(uri: Uri): Boolean {
-        val route = Links.route(uri) ?: return false
+        val route = links.route(uri) ?: return false
         if (current !is WebScreen) return false
         // Leaving sign-in: let old Reddit load. Its page reports who's signed in, and the
         // sync that triggers switches to the native feed.
-        if (browser.url == null || Links.isSignInPage(browser.url)) return false
+        if (browser.url == null || (service.kind == ServiceKind.Reddit && RedditLinks.isSignInPage(browser.url))) return false
         push(screenFor(route))
         return true
     }
@@ -171,19 +197,42 @@ class AccountSession(
         scope.launch { sync() }
     }
 
+    /** Starts signing in: the site's sign-in page, or Lurk's form. */
+    fun signIn() {
+        when (val way = service.signIn) {
+            is SignIn.Web -> openWeb(way.url)
+            SignIn.Form -> signingIn = true
+        }
+    }
+
+    /** Lurk's sign-in form succeeded for this (signed-out) account. */
+    fun onSignedIn(username: String, token: String) {
+        signingIn = false
+        (service as? LemmyService)?.token = token
+        store.update(accountId) { it.copy(username = username, token = token) }
+        shareLemmyLogin()
+        requestSync()
+    }
+
+    /** The instance no longer accepts this account's token: it's signed out. */
+    private fun onLemmyTokenRejected() {
+        store.update(accountId) { it.copy(token = null) }
+    }
+
     /** Signs this account out on this device: wipes its cookies and removes it. */
     fun signOut() {
-        val name = account?.username
+        val name = account?.label
+        (service as? LemmyService)?.let { lemmy -> scope.launch { runCatching { lemmy.logOut() } } }
         if (store.multiProfile) {
             store.remove(accountId) // switches the UI away, which destroys this session
             WebProfiles.wipe(profile)
         } else {
             WebProfiles.wipe(null)
-            store.update(accountId) { it.copy(username = null, subreddits = emptyList()) }
-            api.forget()
+            store.update(accountId) { it.copy(username = null, communities = emptyList(), token = null) }
+            service.forget()
             reset(feed(null))
         }
-        if (name != null) onMessage("Signed out of u/$name")
+        if (name != null) onMessage("Signed out of $name")
     }
 
     /** The login cookie at the last sync triggered by a web page, to sync once per sign-in. */
@@ -194,7 +243,7 @@ class AccountSession(
      * finished, even if the page itself (e.g. old Reddit's login wall) doesn't show it.
      */
     private fun onWebPageLoaded() {
-        if (account?.username != null) return
+        if (service.kind != ServiceKind.Reddit || account?.username != null) return
         val cookie = WebProfiles.loginCookie(browser.webView) ?: return
         if (cookie == lastLoginCookie) return
         lastLoginCookie = cookie
@@ -205,7 +254,7 @@ class AccountSession(
     private suspend fun onPageUser(user: String?, loggedIn: Boolean) {
         // Just signed in, by the page's say-so or because this is the end of the sign-in
         // page: always check, even if the page header didn't give a username.
-        val onSignIn = (current as? WebScreen)?.url == Links.LOGIN
+        val onSignIn = (current as? WebScreen)?.url == RedditLinks.LOGIN
         if (account?.username == null && (loggedIn || onSignIn)) {
             lastPageUser = user
             seenPageUser = true
@@ -239,19 +288,20 @@ class AccountSession(
 
     private suspend fun syncOnce() {
         try {
-            engine.note("Sync started")
-            engine.logCookies()
-            val user = api.whoAmI()
-            val subreddits = if (user != null) api.subscriptions() else emptyList()
-            engine.note("Sync done: ${user?.let { "u/$it" } ?: "signed out"}, ${subreddits.size} subscriptions")
+            service.log.note("Sync started")
+            val user = service.whoAmI()
+            val communities = if (user != null) service.subscriptions() else emptyList()
+            service.log.note("Sync done: ${user?.let { service.naming.user(it) } ?: "signed out"}, ${communities.size} subscriptions")
 
             if (user != null) {
+                val me = account
                 val existing = store.accounts.firstOrNull {
-                    it.id != accountId && it.username.equals(user, ignoreCase = true)
+                    it.id != accountId && it.kind == me?.kind && it.instance == me.instance &&
+                        it.username.equals(user, ignoreCase = true)
                 }
                 if (existing != null) {
                     // Signed into an account that's already added: switch to it, drop this slot.
-                    onMessage("u/$user is already added, switched to it")
+                    onMessage("${existing.label} is already added, switched to it")
                     store.setActive(existing.id)
                     store.remove(accountId)
                     WebProfiles.wipe(profile)
@@ -263,13 +313,13 @@ class AccountSession(
             store.update(accountId) {
                 it.copy(
                     username = user,
-                    subreddits = subreddits,
+                    communities = communities,
                     syncedAt = System.currentTimeMillis(),
                 )
             }
             if (!user.equals(before, ignoreCase = true)) {
                 // Signed in, out, or as someone else: what we've loaded belongs to the old state.
-                api.forget()
+                service.forget()
                 if (current !is WebScreen || user != null) reset(feed(null))
             }
         } catch (e: TimeoutCancellationException) {
@@ -284,6 +334,6 @@ class AccountSession(
     fun destroy() {
         scope.cancel()
         browser.destroy()
-        engine.destroy()
+        service.destroy()
     }
 }

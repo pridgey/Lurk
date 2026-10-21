@@ -9,7 +9,7 @@ import app.lurk.data.AccountSession
 import app.lurk.data.AccountStore
 import app.lurk.data.Comment
 import app.lurk.data.FeedScreen
-import app.lurk.data.FeedSort
+import app.lurk.data.RedditSorts
 import app.lurk.data.More
 import app.lurk.data.Picture
 import app.lurk.data.Post
@@ -45,9 +45,9 @@ class ScreenshotTest {
         domain: String = "self.$sub", flair: String? = null, likes: Boolean? = null,
         over18: Boolean = false, stickied: Boolean = false, saved: Boolean = false,
     ) = Post(
-        name = "t3_$id", id = id, title = title, author = "user_$id", subreddit = sub,
+        name = "t3_$id", id = id, title = title, author = "user_$id", community = sub,
         score = score, likes = likes, saved = saved, numComments = comments,
-        createdUtc = now - hoursAgo * 3600L, permalink = "/r/$sub/comments/$id/x/",
+        createdUtc = now - hoursAgo * 3600L, threadRef = "/r/$sub/comments/$id/x/",
         url = "https://$domain/x", domain = domain, isSelf = selftext.isNotEmpty() || (media == null && thumbnail == null),
         selftext = selftext, selftextHtml = if (selftext.isEmpty()) null else "<div class=\"md\"><p>$selftext</p><p>Second paragraph with a <a href=\"https://example.com\">link</a>.</p></div>",
         flair = flair, over18 = over18, spoiler = false, stickied = stickied, locked = false,
@@ -74,13 +74,24 @@ class ScreenshotTest {
     private fun session(): AccountSession {
         val store = AccountStore(context, multiProfile = false)
         store.update(store.activeId) {
-            it.copy(username = "lurker", subreddits = listOf("androiddev", "AskReddit", "EarthPorn", "Kotlin", "pics", "science"))
+            it.copy(username = "lurker", communities = listOf("androiddev", "AskReddit", "EarthPorn", "Kotlin", "pics", "science"))
         }
         return AccountSession(context, store, store.activeId, Scripts(context), {}, {}, signInFirst = false)
     }
 
-    private fun shoot(name: String, dark: Boolean, setup: (AccountSession) -> Unit) {
-        val s = session()
+    private fun lemmySession(): AccountSession {
+        val store = AccountStore(context, multiProfile = false)
+        store.update(store.activeId) {
+            it.copy(
+                kind = app.lurk.data.ServiceKind.Lemmy, instance = "lemmy.world", username = "lurker",
+                communities = listOf("technology", "linux@lemmy.ml", "memes@sopuli.xyz", "photography"),
+            )
+        }
+        return AccountSession(context, store, store.activeId, Scripts(context), {}, {}, signInFirst = false)
+    }
+
+    private fun shoot(name: String, dark: Boolean, makeSession: () -> AccountSession = ::session, setup: (AccountSession) -> Unit) {
+        val s = makeSession()
         setup(s)
         val store = AccountStore(context, multiProfile = false)
         // Spinners never settle, so step the clock instead of waiting for idle.
@@ -99,17 +110,17 @@ class ScreenshotTest {
     }
 
     private fun feed(s: AccountSession, sub: String?, from: Int = 0) =
-        FeedScreen(sub, FeedSort.Hot, s.api, kotlinx.coroutines.MainScope()).also { it.posts.addAll(posts.drop(from)) }
+        FeedScreen(sub, RedditSorts.feed.first(), s.service, kotlinx.coroutines.MainScope()).also { it.posts.addAll(posts.drop(from)) }
 
     @Test fun feedLight() = shoot("feed", dark = false) { it.reset(feed(it, null)) }
     @Test fun feedDark() = shoot("feed", dark = true) { it.reset(feed(it, null)) }
     @Test fun feedLinksLight() = shoot("feed-links", dark = false) { it.reset(feed(it, "androiddev", from = 2)) }
     @Test fun loadingLight() = shoot("loading", dark = false) {
-        it.reset(FeedScreen("pics", FeedSort.Hot, it.api, kotlinx.coroutines.MainScope()).also { f -> f.loadMore() })
+        it.reset(FeedScreen("pics", RedditSorts.feed.first(), it.service, kotlinx.coroutines.MainScope()).also { f -> f.loadMore() })
     }
 
     private fun thread(s: AccountSession): ThreadScreen {
-        val t = ThreadScreen("/r/Kotlin/comments/a5/x/", posts[4], s.api, kotlinx.coroutines.MainScope())
+        val t = ThreadScreen("/r/Kotlin/comments/a5/x/", posts[4], s.service, kotlinx.coroutines.MainScope())
         fun c(id: String, depth: Int, parent: String, body: String, score: Int, op: Boolean = false, hours: Int = 3) =
             Comment("t1_$id", "commenter_$id", "<div class=\"md\"><p>$body</p></div>", score, false, null, false,
                 now - hours * 3600L, depth, parent, op, false, null, null)
@@ -125,5 +136,11 @@ class ScreenshotTest {
     }
 
     @Test fun threadLight() = shoot("thread", dark = false) { it.reset(thread(it)) }
+
+    private fun lemmyFeed(s: AccountSession) = FeedScreen(null, s.service.feedSorts.first(), s.service, kotlinx.coroutines.MainScope()).also {
+        it.posts.addAll(posts.take(3).map { p -> p.copy(name = "p" + p.id, community = if (p.id == "a2") "photography" else "linux@lemmy.ml", author = "alice@beehaw.org") })
+    }
+
+    @Test fun lemmyFeedLight() = shoot("lemmy-feed", dark = false, ::lemmySession) { it.reset(lemmyFeed(it)) }
     @Test fun threadDark() = shoot("thread", dark = true) { it.reset(thread(it)) }
 }

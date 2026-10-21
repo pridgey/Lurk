@@ -94,15 +94,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import app.lurk.data.Account
 import app.lurk.data.AccountSession
 import app.lurk.data.AccountStore
-import app.lurk.data.CommentSort
+import app.lurk.data.DebugLog
 import app.lurk.data.FeedScreen
-import app.lurk.data.FeedSort
+import app.lurk.data.FixedFeed
+import app.lurk.data.Naming
+import app.lurk.data.ServiceKind
 import app.lurk.data.ThreadScreen
 import app.lurk.data.WebScreen
 import app.lurk.web.BrowserController
-import app.lurk.web.Links
-import app.lurk.web.RedditEngine
 import app.lurk.web.Scripts
+import android.webkit.WebView
 import app.lurk.web.detached
 import kotlinx.coroutines.launch
 
@@ -160,6 +161,14 @@ fun LurkApp(store: AccountStore) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun AccountScreen(store: AccountStore, session: AccountSession, snackbar: SnackbarHostState) {
+    CompositionLocalProvider(LocalNaming provides session.service.naming) {
+        AccountContent(store, session, snackbar)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun AccountContent(store: AccountStore, session: AccountSession, snackbar: SnackbarHostState) {
     val browser = session.browser
     val account = session.account ?: return
     val screen = session.current
@@ -168,19 +177,24 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     var confirmSignOut by remember { mutableStateOf(false) }
     var settingPin by remember { mutableStateOf(false) }
     var confirmRemovePin by remember { mutableStateOf(false) }
+    var addingLemmy by remember { mutableStateOf(false) }
+    val service = session.service
+    val links = session.links
+    val naming = service.naming
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val onMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
     val handlers = remember(session) {
         PostHandlers(
-            openThread = { post -> session.push(session.thread(post.permalink, post)) },
+            openThread = { post -> session.push(session.thread(post.threadRef, post)) },
             openLink = { url -> session.openLink(url) },
             openImage = { url -> session.viewingImage = url },
-            openSubreddit = { name -> session.push(session.feed(name)) },
-            openUser = { name -> session.openWeb(Links.user(name)) },
-            openOnWeb = { post -> session.openWeb(Links.webOrigin + post.permalink) },
-            share = { post -> sharePost(context, post) },
+            openCommunity = { name -> session.push(session.feed(name)) },
+            openUser = { name -> session.openWeb(session.links.user(name)) },
+            openRef = { ref -> session.push(session.thread(ref)) },
+            openOnWeb = { post -> session.openWeb(session.links.thread(post.threadRef)) },
+            share = { post -> sharePost(context, post, session.links.share(post)) },
             openVideo = { post, startMs -> session.openVideo(post, startMs) },
             inlineVideo = InlineVideo(),
         )
@@ -194,8 +208,8 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     }
     val webBack = screen is WebScreen && browser.canGoBack
 
-    // From a subreddit picked in the bottom bar, Back goes Home before leaving the app.
-    val backToHome = session.stack.size == 1 && screen is FeedScreen && screen.subreddit != null
+    // From a community picked in the bottom bar, Back goes Home before leaving the app.
+    val backToHome = session.stack.size == 1 && screen is FeedScreen && screen.community != null
     BackHandler(enabled = debugOpen || webBack || session.stack.size > 1 || backToHome) {
         when {
             debugOpen -> debugOpen = false
@@ -209,30 +223,34 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     val title = when (screen) {
         is FeedScreen -> screen.label
-        is ThreadScreen -> screen.post?.let { "r/${it.subreddit}" } ?: "Comments"
-        is WebScreen -> Links.locate(browser.url).label
+        is ThreadScreen -> screen.post?.let { post -> post.community?.let(naming::community) } ?: "Comments"
+        is WebScreen -> links.locate(browser.url).label
     }
-    val titleSubreddit = when (screen) {
-        is FeedScreen -> screen.subreddit
-        is ThreadScreen -> screen.post?.subreddit
+    val titleCommunity = when (screen) {
+        is FeedScreen -> screen.community?.let { c ->
+            service.fixedFeeds.firstOrNull { it.community == c }?.label?.lowercase() ?: c
+        }
+        is ThreadScreen -> screen.post?.community
         is WebScreen -> null
     }
 
     val selectedFeed: String? = when (screen) {
-        is FeedScreen -> if (screen.subreddit == null) HOME_KEY else screen.subreddit.lowercase()
-        is ThreadScreen -> screen.post?.subreddit?.lowercase()
-        is WebScreen -> Links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.subreddit }
+        is FeedScreen -> if (screen.community == null) HOME_KEY else screen.community.lowercase()
+        is ThreadScreen -> screen.post?.community?.lowercase()
+        is WebScreen -> links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.community }
     }
     if (subredditsOpen) {
         SubredditSheet(
-            subreddits = account.subreddits,
+            subreddits = account.communities,
+            naming = naming,
+            fixedFeeds = service.fixedFeeds,
             selected = selectedFeed,
             homeKey = HOME_KEY,
             signedIn = account.username != null,
             syncing = session.syncing,
             onHome = { session.reset(session.feed(null)) },
             onSubreddit = { session.reset(session.feed(it)) },
-            onSignIn = { session.openWeb(Links.LOGIN) },
+            onSignIn = { session.signIn() },
             onDismiss = { subredditsOpen = false },
         )
     }
@@ -257,10 +275,10 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         when {
-                            titleSubreddit != null -> Avatar(titleSubreddit, 36.dp)
+                            titleCommunity != null -> Avatar(titleCommunity, 36.dp)
                             screen is FeedScreen -> HomeBadge()
                         }
-                        Column(Modifier.padding(start = if (titleSubreddit != null || screen is FeedScreen) 12.dp else 0.dp)) {
+                        Column(Modifier.padding(start = if (titleCommunity != null || screen is FeedScreen) 12.dp else 0.dp)) {
                             Text(
                                 title,
                                 style = MaterialTheme.typography.titleLarge,
@@ -268,7 +286,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                account.username?.let { "u/$it" } ?: "Not signed in",
+                                account.label ?: account.instance?.let { "Not signed in · $it" } ?: "Not signed in",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -277,23 +295,28 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                 },
                 actions = {
                     when (screen) {
-                        is FeedScreen -> SortMenu(screen.sort.label, FeedSort.entries, { it.label }) { screen.changeSort(it) }
-                        is ThreadScreen -> SortMenu(screen.sort.label, CommentSort.entries, { it.label }) { screen.changeSort(it) }
+                        is FeedScreen -> screen.sort?.let { sort ->
+                            SortMenu(sort.label, service.feedSorts, { it.label }) { screen.changeSort(it) }
+                        }
+                        is ThreadScreen -> screen.sort?.let { sort ->
+                            SortMenu(sort.label, service.commentSorts, { it.label }) { screen.changeSort(it) }
+                        }
                         is WebScreen -> Unit
                     }
                     AccountMenu(
                         store = store,
                         current = account,
-                        onSignIn = { session.openWeb(Links.LOGIN) },
-                        onAdd = {
-                            if (account.username == null) {
-                                session.openWeb(Links.LOGIN) // reuse this empty slot
+                        onSignIn = { session.signIn() },
+                        onAddReddit = {
+                            if (account.username == null && account.kind == ServiceKind.Reddit) {
+                                session.signIn() // reuse this empty slot
                             } else {
-                                val added = store.add()
+                                val added = store.add(ServiceKind.Reddit)
                                 store.requestLogin(added.id)
                                 store.setActive(added.id)
                             }
                         },
+                        onAddLemmy = { addingLemmy = true },
                         onSignOut = { confirmSignOut = true },
                         onSetPin = { settingPin = true },
                         onRemovePin = { confirmRemovePin = true },
@@ -308,7 +331,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                             }
                         },
                         onSync = { session.requestSync() },
-                        onInbox = { session.openWeb(Links.INBOX) },
+                        onInbox = links.inbox?.let { inbox -> { session.openWeb(inbox) } },
                         onViewOnWeb = if (screen is WebScreen) null else ({ currentUrl?.let(session::openWeb) }),
                         onOpenOutside = { currentUrl?.let { openExternal(context, Uri.parse(it)) } },
                         onDebug = { debugOpen = true },
@@ -319,11 +342,13 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         bottomBar = {
             SubredditBar(
                 account = account,
+                naming = naming,
+                fixedFeeds = service.fixedFeeds,
                 selected = selectedFeed,
                 syncing = session.syncing,
                 onHome = { session.reset(session.feed(null)) },
                 onSubreddit = { session.reset(session.feed(it)) },
-                onSignIn = { session.openWeb(Links.LOGIN) },
+                onSignIn = { session.signIn() },
                 onOpenAll = { subredditsOpen = true },
             )
         },
@@ -347,7 +372,8 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                 }
             }
             EngineHost(
-                engine = session.engine,
+                log = service.log,
+                engineView = service.engineView,
                 open = debugOpen,
                 syncing = session.syncing,
                 onSync = { session.requestSync() },
@@ -394,7 +420,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                 onClose = { session.playingVideo = null },
                 onOpenOnWeb = {
                     session.playingVideo = null
-                    session.openWeb(Links.webOrigin + post.permalink)
+                    session.openWeb(links.thread(post.threadRef))
                 },
             )
             embed != null -> EmbedPlayer(
@@ -408,6 +434,36 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
                 onExternalLink = { uri -> openExternal(context, uri) },
             )
         }
+    }
+
+    if (session.signingIn) {
+        LemmyLoginDialog(
+            instance = account.instance,
+            onSignedIn = { _, username, token -> session.onSignedIn(username, token) },
+            onCancel = { session.signingIn = false },
+        )
+    }
+    if (addingLemmy) {
+        LemmyLoginDialog(
+            instance = null,
+            onSignedIn = { instance, username, token ->
+                addingLemmy = false
+                val existing = store.accounts.firstOrNull {
+                    it.kind == ServiceKind.Lemmy && it.instance == instance && it.username.equals(username, ignoreCase = true)
+                }
+                if (existing != null) {
+                    store.update(existing.id) { it.copy(token = token) }
+                    store.setActive(existing.id)
+                    onMessage("${existing.label} is already added, switched to it")
+                } else {
+                    val added = store.add(ServiceKind.Lemmy) {
+                        it.copy(username = username, instance = instance, token = token)
+                    }
+                    store.setActive(added.id)
+                }
+            },
+            onCancel = { addingLemmy = false },
+        )
     }
 
     if (settingPin) {
@@ -425,7 +481,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
         AlertDialog(
             onDismissRequest = { confirmRemovePin = false },
             title = { Text("Remove the PIN?") },
-            text = { Text("Anyone using this phone will be able to switch to ${account.username?.let { "u/$it" } ?: "this account"}.") },
+            text = { Text("Anyone using this phone will be able to switch to ${account.label ?: "this account"}.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemovePin = false
@@ -439,7 +495,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
-            title = { Text("Sign out of u/${account.username}?") },
+            title = { Text("Sign out of ${account.label}?") },
             text = { Text("This removes the account from Lurk on this phone. You can add it again any time.") },
             confirmButton = {
                 TextButton(onClick = {
@@ -454,7 +510,7 @@ internal fun AccountScreen(store: AccountStore, session: AccountSession, snackba
     }
 }
 
-private const val HOME_KEY = ":home" // can't clash with a subreddit name
+private const val HOME_KEY = ":home" // can't clash with a community name
 
 /**
  * The visible WebView, for a [WebScreen]. Several web screens can be on the stack but
@@ -520,7 +576,8 @@ private fun AccountMenu(
     store: AccountStore,
     current: Account,
     onSignIn: () -> Unit,
-    onAdd: () -> Unit,
+    onAddReddit: () -> Unit,
+    onAddLemmy: () -> Unit,
     onSignOut: () -> Unit,
     onSetPin: () -> Unit,
     onRemovePin: () -> Unit,
@@ -542,7 +599,7 @@ private fun AccountMenu(
                         Text(
                             when {
                                 store.needsPin(a.id) -> "Private account"
-                                else -> a.username?.let { "u/$it" } ?: "Not signed in"
+                                else -> a.label ?: a.instance?.let { "Not signed in · $it" } ?: "Not signed in"
                             },
                         )
                     },
@@ -575,9 +632,14 @@ private fun AccountMenu(
             }
             if (store.multiProfile) {
                 DropdownMenuItem(
-                    text = { Text("Add account") },
+                    text = { Text("Add Reddit account") },
                     leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    onClick = { open = false; onAdd() },
+                    onClick = { open = false; onAddReddit() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Add Lemmy account") },
+                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    onClick = { open = false; onAddLemmy() },
                 )
             }
             if (current.username != null) {
@@ -587,7 +649,7 @@ private fun AccountMenu(
                     onClick = { open = false; if (current.locked) onRemovePin() else onSetPin() },
                 )
                 DropdownMenuItem(
-                    text = { Text("Sign out of u/${current.username}") },
+                    text = { Text("Sign out of ${current.label}") },
                     onClick = { open = false; onSignOut() },
                 )
             }
@@ -612,7 +674,8 @@ private fun OverflowMenu(
     syncing: Boolean,
     onRefresh: () -> Unit,
     onSync: () -> Unit,
-    onInbox: () -> Unit,
+    /** Null when the site has no inbox page. */
+    onInbox: (() -> Unit)?,
     /** Null when already on the web. */
     onViewOnWeb: (() -> Unit)?,
     onOpenOutside: () -> Unit,
@@ -630,7 +693,9 @@ private fun OverflowMenu(
                 enabled = !syncing,
                 onClick = { open = false; onSync() },
             )
-            DropdownMenuItem(text = { Text("Inbox") }, onClick = { open = false; onInbox() })
+            if (onInbox != null) {
+                DropdownMenuItem(text = { Text("Inbox") }, onClick = { open = false; onInbox() })
+            }
             if (onViewOnWeb != null) {
                 DropdownMenuItem(text = { Text("View on web") }, onClick = { open = false; onViewOnWeb() })
             }
@@ -644,13 +709,15 @@ private fun OverflowMenu(
 @Composable
 private fun SubredditBar(
     account: Account,
-    /** Lowercase subreddit name, [HOME_KEY], or null. */
+    naming: Naming,
+    fixedFeeds: List<FixedFeed>,
+    /** Lowercase community name, [HOME_KEY], or null. */
     selected: String?,
     syncing: Boolean,
     onHome: () -> Unit,
     onSubreddit: (String) -> Unit,
     onSignIn: () -> Unit,
-    /** Opens the drawer with every subreddit. */
+    /** Opens the drawer with every community. */
     onOpenAll: () -> Unit,
 ) {
     // A swipe up anywhere on the bar opens the drawer.
@@ -669,7 +736,7 @@ private fun SubredditBar(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClickLabel = "All subreddits", onClick = onOpenAll)
+                    .clickable(onClickLabel = "All ${naming.communityNoun.plural()}", onClick = onOpenAll)
                     .padding(top = 8.dp, bottom = 2.dp),
             ) {
                 Box(
@@ -689,19 +756,19 @@ private fun SubredditBar(
                         Icon(Icons.Default.Home, null, Modifier.size(18.dp))
                     }
                 }
-                items(listOf("popular", "all"), key = { "fixed:$it" }) { name ->
-                    BarChip(name.replaceFirstChar { it.uppercase() }, selected == name, { onSubreddit(name) }, avatar = name)
+                items(fixedFeeds, key = { "fixed:${it.community}" }) { feed ->
+                    BarChip(feed.label, selected == feed.community.lowercase(), { onSubreddit(feed.community) }, avatar = feed.label.lowercase())
                 }
                 when {
                     account.username == null -> item(key = "hint:signin") {
-                        BarChip("Sign in to see your subreddits", false, onSignIn, accent = true)
+                        BarChip("Sign in to see your ${naming.communityNoun.plural()}", false, onSignIn, accent = true)
                     }
-                    account.subreddits.isEmpty() && syncing -> item(key = "hint:loading") {
+                    account.communities.isEmpty() && syncing -> item(key = "hint:loading") {
                         BarChip("Loading subscriptions…", false, {})
                     }
                 }
-                items(account.subreddits, key = { "sub:" + it.lowercase() }) { name ->
-                    BarChip(name, selected == name.lowercase(), { onSubreddit(name) }, avatar = name)
+                items(account.communities, key = { "sub:" + it.lowercase() }) { name ->
+                    BarChip(naming.chip(name, account.communities), selected == name.lowercase(), { onSubreddit(name) }, avatar = name)
                 }
             }
         }
@@ -771,24 +838,28 @@ private fun HomeBadge() {
  */
 @Composable
 private fun BoxScope.EngineHost(
-    engine: RedditEngine,
+    log: DebugLog,
+    /** The service's hidden WebView, if it has one. */
+    engineView: WebView?,
     open: Boolean,
     syncing: Boolean,
     onSync: () -> Unit,
     onClose: () -> Unit,
 ) {
     if (!open) {
-        AndroidView(
-            factory = { engine.webView.detached() },
-            modifier = Modifier.size(1.dp).alpha(0f).align(Alignment.TopStart),
-        )
+        if (engineView != null) {
+            AndroidView(
+                factory = { engineView.detached() },
+                modifier = Modifier.size(1.dp).alpha(0f).align(Alignment.TopStart),
+            )
+        }
         return
     }
     val clipboard = LocalClipboardManager.current
     val report = buildString {
-        engine.log.forEach { appendLine(it) }
+        log.lines.forEach { appendLine(it) }
         appendLine()
-        append(engine.lastResult ?: "No response yet.")
+        append(log.lastResult ?: "No response yet.")
     }
     Surface(Modifier.fillMaxSize(), tonalElevation = 2.dp) {
         Column {
@@ -803,11 +874,13 @@ private fun BoxScope.EngineHost(
                 TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
                 TextButton(onClick = onClose) { Text("Close") }
             }
-            AndroidView(
-                factory = { engine.webView.detached() },
-                modifier = Modifier.fillMaxWidth().weight(1f),
-            )
-            HorizontalDivider()
+            if (engineView != null) {
+                AndroidView(
+                    factory = { engineView.detached() },
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
+                HorizontalDivider()
+            }
             SelectionContainer {
                 Text(
                     text = report,
@@ -815,7 +888,7 @@ private fun BoxScope.EngineHost(
                     fontSize = 11.sp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .then(if (engineView != null) Modifier.height(220.dp) else Modifier.weight(1f))
                         .verticalScroll(rememberScrollState())
                         .padding(12.dp),
                 )
@@ -825,11 +898,11 @@ private fun BoxScope.EngineHost(
 }
 
 /** Shares a post's title and link through the system share sheet. */
-private fun sharePost(context: Context, post: Post) {
+private fun sharePost(context: Context, post: Post, link: String) {
     val send = Intent(Intent.ACTION_SEND)
         .setType("text/plain")
         .putExtra(Intent.EXTRA_SUBJECT, post.title)
-        .putExtra(Intent.EXTRA_TEXT, "https://www.reddit.com" + post.permalink)
+        .putExtra(Intent.EXTRA_TEXT, link)
     context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 

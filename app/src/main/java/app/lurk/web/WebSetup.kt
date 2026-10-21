@@ -36,7 +36,7 @@ object WebSetup {
 
         // Apply the skin before the page paints, so there's no flash of unstyled old Reddit.
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            WebViewCompat.addDocumentStartJavaScript(webView, scripts.skin, setOf(Links.OLD_ORIGIN))
+            WebViewCompat.addDocumentStartJavaScript(webView, scripts.skin, setOf(RedditLinks.OLD_ORIGIN))
         }
         return webView
     }

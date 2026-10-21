@@ -10,14 +10,8 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import app.lurk.data.DebugLog
 import java.io.IOException
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
@@ -39,7 +33,7 @@ class HttpResult(val status: Int, val body: String, val url: String)
  * page) and hands the responses back through a JavaScript bridge.
  * All calls run on the main thread and one at a time, with a gap between requests.
  */
-class RedditEngine(context: Context, profile: String?, scripts: Scripts) {
+class RedditEngine(context: Context, profile: String?, scripts: Scripts, private val log: DebugLog) {
 
     val webView: WebView = WebSetup.create(context, profile, scripts)
 
@@ -48,13 +42,6 @@ class RedditEngine(context: Context, profile: String?, scripts: Scripts) {
     private val pending = mutableMapOf<String, CompletableDeferred<HttpResult>>()
     private val main = Handler(Looper.getMainLooper())
     private var lastRequestAt = 0L
-
-    /** Recent activity, newest last; shown in Engine debug. */
-    val log = mutableStateListOf<String>()
-
-    /** The start of the last response; shown in Engine debug. */
-    var lastResult by mutableStateOf<String?>(null)
-        private set
 
     /** Receives fetch() results from the page. Called on a background thread. */
     private inner class Bridge {
@@ -87,7 +74,7 @@ class RedditEngine(context: Context, profile: String?, scripts: Scripts) {
 
     /** Logs which cookies the account has for Reddit (names only) and whether it's signed in. */
     fun logCookies() {
-        val names = WebProfiles.cookiesOf(webView).getCookie(Links.OLD_ORIGIN).orEmpty()
+        val names = WebProfiles.cookiesOf(webView).getCookie(RedditLinks.OLD_ORIGIN).orEmpty()
             .split(';').map { it.substringBefore('=').trim() }.filter { it.isNotEmpty() }
         note("Cookies: ${names.joinToString().ifEmpty { "none" }}")
         note("Login cookie (reddit_session): ${if ("reddit_session" in names) "present" else "missing"}")
@@ -129,7 +116,7 @@ class RedditEngine(context: Context, profile: String?, scripts: Scripts) {
         try {
             val result = withTimeout(LOAD_TIMEOUT_MS) { waiter.await() }
             if (result.status != 200) note("  -> HTTP ${result.status}")
-            lastResult = result.body.take(4_000)
+            log.lastResult = result.body.take(4_000)
             result
         } finally {
             pending.remove(id)
@@ -156,11 +143,7 @@ class RedditEngine(context: Context, profile: String?, scripts: Scripts) {
         return webView.url.orEmpty()
     }
 
-    fun note(message: String) {
-        val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-        log.add("$time  $message")
-        while (log.size > 60) log.removeAt(0)
-    }
+    fun note(message: String) = log.note(message)
 
     fun destroy() {
         pageWaiter?.cancel()

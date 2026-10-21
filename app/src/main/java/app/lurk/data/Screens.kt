@@ -14,11 +14,11 @@ import kotlinx.coroutines.launch
 /** One entry in the back stack. Each keeps its own loaded data and scroll position. */
 sealed interface Screen
 
-/** A list of posts: the front page (subreddit = null) or a subreddit. */
+/** A list of posts: Home (community = null), a fixed feed like r/all, or a community. */
 class FeedScreen(
-    val subreddit: String?,
-    sort: FeedSort,
-    private val api: RedditApi,
+    val community: String?,
+    sort: Sort?,
+    private val service: Service,
     private val scope: CoroutineScope,
 ) : Screen {
     var sort by mutableStateOf(sort)
@@ -41,12 +41,14 @@ class FeedScreen(
     private var job: Job? = null
     private var generation = 0
 
-    val label: String get() = subreddit?.let { "r/$it" } ?: "Home"
-    val webUrl: String get() = api.feedUrl(subreddit, sort)
+    val label: String
+        get() = community?.let { c ->
+            service.fixedFeeds.firstOrNull { it.community.equals(c, ignoreCase = true) }?.label ?: service.naming.community(c)
+        } ?: "Home"
+    val webUrl: String get() = service.links.feed(community, sort)
 
-    /** Front page, r/all, r/popular and multireddits mix subreddits, so posts show theirs. */
-    val showsSubreddit: Boolean
-        get() = subreddit == null || subreddit.lowercase() in setOf("all", "popular") || '+' in subreddit
+    /** Feeds that mix communities show each post's. */
+    val showsCommunity: Boolean get() = service.isMixed(community)
 
     fun loadMore() {
         if (loading || endReached) return
@@ -55,7 +57,7 @@ class FeedScreen(
         error = null
         job = scope.launch {
             try {
-                val page = api.feed(subreddit, sort, after)
+                val page = service.feed(community, sort, after)
                 if (gen != generation) return@launch
                 val seen = posts.mapTo(HashSet()) { it.name }
                 posts.addAll(page.posts.filter { seen.add(it.name) })
@@ -83,7 +85,7 @@ class FeedScreen(
         loadMore()
     }
 
-    fun changeSort(newSort: FeedSort) {
+    fun changeSort(newSort: Sort) {
         if (newSort == sort) return
         sort = newSort
         refresh()
@@ -92,15 +94,16 @@ class FeedScreen(
 
 /** A post and its comments. */
 class ThreadScreen(
-    val permalink: String,
+    /** What the service opens: usually the post's [Post.threadRef]. */
+    val ref: String,
     preview: Post?,
-    private val api: RedditApi,
+    private val service: Service,
     private val scope: CoroutineScope,
 ) : Screen {
     var post by mutableStateOf(preview)
         private set
     val items = mutableStateListOf<ThreadItem>()
-    var sort by mutableStateOf(CommentSort.Best)
+    var sort by mutableStateOf(service.commentSorts.firstOrNull())
         private set
     var loading by mutableStateOf(false)
         private set
@@ -117,7 +120,7 @@ class ThreadScreen(
     private var job: Job? = null
     private var generation = 0
 
-    val webUrl: String get() = app.lurk.web.Links.webOrigin + permalink
+    val webUrl: String get() = service.links.thread(ref)
 
     fun load() {
         generation++
@@ -127,7 +130,7 @@ class ThreadScreen(
         error = null
         job = scope.launch {
             try {
-                val data = api.thread(permalink, sort)
+                val data = service.thread(ref, sort)
                 if (gen != generation) return@launch
                 post = data.post
                 isSingleThread = data.isSingleThread
@@ -145,7 +148,7 @@ class ThreadScreen(
         }
     }
 
-    fun changeSort(newSort: CommentSort) {
+    fun changeSort(newSort: Sort) {
         if (newSort == sort) return
         sort = newSort
         load()
@@ -164,12 +167,12 @@ class ThreadScreen(
         val gen = generation
         scope.launch {
             try {
-                val loaded = api.moreChildren(post, more, sort)
+                val loaded = service.moreChildren(post, more, sort)
                 if (gen != generation) return@launch
                 val index = items.indexOfFirst { it.key == more.key }
                 if (index >= 0) {
                     items.removeAt(index)
-                    // Rows must have unique keys; skip anything Reddit sends twice.
+                    // Rows must have unique keys; skip anything sent twice.
                     val present = items.mapTo(HashSet()) { it.key }
                     items.addAll(index, loaded.filter { present.add(it.key) })
                 }
@@ -184,12 +187,8 @@ class ThreadScreen(
         return true
     }
 
-    /** The permalink for a "continue this thread" row. */
-    fun continueUrl(more: More): String {
-        // The post's own permalink never ends in a comment id, unlike a single-thread link.
-        val base = (post?.permalink ?: permalink).substringBefore('?').trimEnd('/')
-        return base + "/" + more.parentName.removePrefix("t1_") + "/"
-    }
+    /** The thread to open for a "continue this thread" row. */
+    fun continueRef(more: More): String = service.continueRef(post, ref, more)
 
     /** Visible rows, skipping the replies under collapsed comments. */
     fun visibleItems(): List<ThreadItem> {
@@ -211,17 +210,20 @@ class WebScreen(var url: String) : Screen
 enum class Vote { Up, None, Down }
 
 /**
- * Votes and saves, applied to the UI at once and sent through the engine. Overrides
- * are kept by fullname so every screen showing the same post or comment agrees.
+ * Votes and saves, applied to the UI at once and sent to the service. Overrides
+ * are kept by name so every screen showing the same post or comment agrees.
  */
 class Actions(
-    private val api: RedditApi,
+    private val service: Service,
     private val scope: CoroutineScope,
     private val signedIn: () -> Boolean,
     private val onMessage: (String) -> Unit,
 ) {
     private val votes = mutableStateMapOf<String, Vote>()
     private val saves = mutableStateMapOf<String, Boolean>()
+
+    /** Whether to offer a downvote button. */
+    val downvotes: Boolean get() = service.downvotes
 
     fun vote(name: String, base: Boolean?): Vote = votes[name] ?: base.toVote()
 
@@ -242,7 +244,7 @@ class Actions(
         votes[name] = next
         scope.launch {
             try {
-                api.vote(name, next.weight)
+                service.vote(name, next.weight)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -261,7 +263,7 @@ class Actions(
         saves[name] = !before
         scope.launch {
             try {
-                api.setSaved(name, !before)
+                service.setSaved(name, !before)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lurk.data.Actions
+import app.lurk.data.Naming
+import app.lurk.data.RedditNaming
 import app.lurk.data.Picture
 import app.lurk.data.Post
 import app.lurk.data.PostMedia
@@ -64,9 +66,11 @@ class PostHandlers(
     val openThread: (Post) -> Unit,
     val openLink: (String) -> Unit,
     val openImage: (String) -> Unit,
-    val openSubreddit: (String) -> Unit,
+    val openCommunity: (String) -> Unit,
     val openUser: (String) -> Unit,
-    /** Reddit's own page for the post. */
+    /** Opens a thread by its ref, e.g. "continue this thread". */
+    val openRef: (String) -> Unit,
+    /** The site's own page for the post. */
     val openOnWeb: (Post) -> Unit,
     /** Plays the post's video full screen from a spot (ms), or sends it to the site it's from. */
     val openVideo: (Post, Long) -> Unit,
@@ -78,12 +82,15 @@ class PostHandlers(
 /** Whether the active account shows NSFW media without a tap. */
 val LocalShowNsfw = compositionLocalOf { false }
 
+/** How the active account's site names communities and people. */
+val LocalNaming = compositionLocalOf<Naming> { RedditNaming }
+
 private val CardShape = RoundedCornerShape(24.dp)
 private val MediaShape = RoundedCornerShape(16.dp)
 
 /** A post in a feed: a card; tapping it opens the thread. */
 @Composable
-fun PostCard(post: Post, showSubreddit: Boolean, actions: Actions, on: PostHandlers) {
+fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers) {
     Surface(
         shape = CardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -94,19 +101,23 @@ fun PostCard(post: Post, showSubreddit: Boolean, actions: Actions, on: PostHandl
             .clickable { on.openThread(post) },
     ) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp)) {
-            PostHeader(post, showSubreddit, on)
-            Text(
-                post.title,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 10.dp),
-            )
+            PostHeader(post, showCommunity, on)
+            if (post.title.isNotBlank()) {
+                Text(
+                    post.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
             PostTags(post)
             if (post.isSelf && post.selftext.isNotBlank()) {
+                // Without a title, the text is the post: show more of it, in full color.
+                val untitled = post.title.isBlank()
                 Text(
                     post.selftext,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
+                    color = if (untitled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = if (untitled) 8 else 3,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 6.dp),
                 )
@@ -122,18 +133,21 @@ fun PostCard(post: Post, showSubreddit: Boolean, actions: Actions, on: PostHandl
 @Composable
 fun PostDetail(post: Post, actions: Actions, on: PostHandlers) {
     Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
-        PostHeader(post, showSubreddit = true, on = on)
-        Text(
-            post.title,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(top = 12.dp),
-        )
+        PostHeader(post, showCommunity = true, on = on)
+        if (post.title.isNotBlank()) {
+            Text(
+                post.title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+        }
         PostTags(post)
         if (!post.isSelf && post.media == null) LinkPreview(post, on)
         post.media?.let { PostMediaView(post, it, compact = false, on = on) }
         post.selftextHtml?.let { html ->
-            HtmlText(
+            CommentBody(
                 html,
+                post.bodyImages,
                 onLink = on.openLink,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = 12.dp),
@@ -164,26 +178,24 @@ fun Avatar(name: String, size: Dp, modifier: Modifier = Modifier, tint: Color? =
 }
 
 @Composable
-private fun PostHeader(post: Post, showSubreddit: Boolean, on: PostHandlers) {
+private fun PostHeader(post: Post, showCommunity: Boolean, on: PostHandlers) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val naming = LocalNaming.current
+    // Sites without communities always lead with the author.
+    val community = post.community?.takeIf { showCommunity }
+    val open = { if (community != null) on.openCommunity(community) else on.openUser(post.author) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (showSubreddit) {
-            Avatar(post.subreddit, 34.dp, Modifier.clickable { on.openSubreddit(post.subreddit) })
-        } else {
-            Avatar(post.author, 34.dp, Modifier.clickable { on.openUser(post.author) })
-        }
+        Avatar(community ?: post.author, 34.dp, Modifier.clickable(onClick = open))
         Column(Modifier.padding(start = 10.dp).weight(1f)) {
             Text(
-                if (showSubreddit) "r/${post.subreddit}" else "u/${post.author}",
+                if (community != null) naming.community(community) else naming.user(post.author),
                 style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clickable {
-                    if (showSubreddit) on.openSubreddit(post.subreddit) else on.openUser(post.author)
-                },
+                modifier = Modifier.clickable(onClick = open),
             )
             Text(
-                (if (showSubreddit) "u/${post.author} · " else "") + ago(post.createdUtc),
+                (if (community != null) naming.user(post.author) + " · " else "") + ago(post.createdUtc),
                 style = MaterialTheme.typography.labelMedium,
                 color = muted,
                 maxLines = 1,
@@ -504,7 +516,11 @@ private fun VotePill(name: String, score: Int, likes: Boolean?, actions: Actions
                 maxLines = 1,
                 modifier = Modifier.widthIn(min = 28.dp),
             )
-            VoteButton(up = false, vote, color, neutral) { actions.toggleVote(name, likes, up = false) }
+            if (actions.downvotes || vote == Vote.Down) {
+                VoteButton(up = false, vote, color, neutral) { actions.toggleVote(name, likes, up = false) }
+            } else {
+                Spacer(Modifier.width(10.dp))
+            }
         }
     }
 }
@@ -547,7 +563,9 @@ fun VoteControls(name: String, score: Int, likes: Boolean?, actions: Actions, sc
             maxLines = 1,
             modifier = Modifier.widthIn(min = 24.dp),
         )
-        VoteButton(up = false, vote, color, neutral) { actions.toggleVote(name, likes, up = false) }
+        if (actions.downvotes || vote == Vote.Down) {
+            VoteButton(up = false, vote, color, neutral) { actions.toggleVote(name, likes, up = false) }
+        }
     }
 }
 

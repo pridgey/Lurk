@@ -40,7 +40,7 @@ object WebProfiles {
 
     /** The value of Reddit's login cookie (reddit_session) in [webView]'s jar, if any. */
     fun loginCookie(webView: WebView): String? =
-        cookiesOf(webView).getCookie(Links.OLD_ORIGIN).orEmpty().split(';')
+        cookiesOf(webView).getCookie(RedditLinks.OLD_ORIGIN).orEmpty().split(';')
             .map { it.trim() }
             .firstOrNull { it.startsWith("reddit_session=") }
             ?.substringAfter('=')?.takeIf { it.isNotEmpty() }

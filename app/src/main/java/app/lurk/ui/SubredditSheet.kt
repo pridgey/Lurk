@@ -47,19 +47,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.lurk.data.FixedFeed
+import app.lurk.data.Naming
 import kotlinx.coroutines.launch
 
-private val subredditName = Regex("[A-Za-z0-9_]{2,21}")
-
 /**
- * Every subreddit at once: search, Home / Popular / All, then subscriptions A to Z.
- * Typing a name you don't follow offers to go there anyway.
+ * Every community at once: search, Home and the fixed feeds (Popular / All), then
+ * subscriptions A to Z. Typing a name you don't follow offers to go there anyway.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SubredditSheet(
     subreddits: List<String>,
-    /** Lowercase subreddit name, the Home key, or null. */
+    naming: Naming,
+    fixedFeeds: List<FixedFeed>,
+    /** Lowercase community name, the Home key, or null. */
     selected: String?,
     homeKey: String,
     signedIn: Boolean,
@@ -78,13 +80,13 @@ fun SubredditSheet(
         scope.launch { state.hide() }.invokeOnCompletion { onDismiss(); action() }
     }
 
-    val typed = query.trim().removePrefix("r/").removePrefix("/r/")
+    val typed = naming.clean(query)
     val matches = remember(subreddits, typed) {
         if (typed.isEmpty()) subreddits
         else subreddits.filter { it.contains(typed, ignoreCase = true) }
             .sortedBy { !it.startsWith(typed, ignoreCase = true) } // prefix matches first
     }
-    val canGoTo = typed.matches(subredditName) && matches.none { it.equals(typed, ignoreCase = true) }
+    val canGoTo = naming.isCommunityName(typed) && matches.none { it.equals(typed, ignoreCase = true) }
     // The keyboard's Go: an exact match, else the typed name, else the best match.
     fun go() {
         val target = matches.firstOrNull { it.equals(typed, ignoreCase = true) }
@@ -103,7 +105,7 @@ fun SubredditSheet(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Find or go to a subreddit") },
+                placeholder = { Text("Find or go to a ${naming.communityNoun}") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
@@ -133,9 +135,9 @@ fun SubredditSheet(
                             FeedTile("Home", selected == homeKey, Modifier.weight(1f), { pick(onHome) }) {
                                 Icon(Icons.Default.Home, null, Modifier.size(22.dp))
                             }
-                            for (name in listOf("popular", "all")) {
-                                FeedTile(name.replaceFirstChar { it.uppercase() }, selected == name, Modifier.weight(1f), { pick { onSubreddit(name) } }) {
-                                    Avatar(name, 22.dp)
+                            for (feed in fixedFeeds) {
+                                FeedTile(feed.label, selected == feed.community.lowercase(), Modifier.weight(1f), { pick { onSubreddit(feed.community) } }) {
+                                    Avatar(feed.label.lowercase(), 22.dp)
                                 }
                             }
                         }
@@ -143,12 +145,12 @@ fun SubredditSheet(
                 }
                 if (canGoTo) {
                     item(key = "goto") {
-                        SubredditRow("Go to r/$typed", typed, selected = false) { pick { onSubreddit(typed) } }
+                        SubredditRow("Go to ${naming.community(typed)}", typed, selected = false) { pick { onSubreddit(typed) } }
                     }
                 }
                 when {
                     !signedIn -> item(key = "signin") {
-                        Hint("Sign in to see your subreddits", onClick = { pick(onSignIn) })
+                        Hint("Sign in to see your ${naming.communityNoun.plural()}", onClick = { pick(onSignIn) })
                     }
                     subreddits.isEmpty() && syncing -> item(key = "loading") { Hint("Loading subscriptions…") }
                     typed.isNotEmpty() && matches.isEmpty() && !canGoTo -> item(key = "none") { Hint("No matches") }
@@ -247,3 +249,6 @@ private fun Hint(text: String, onClick: (() -> Unit)? = null) {
             .padding(horizontal = 24.dp, vertical = 16.dp),
     )
 }
+
+/** "subreddit" to "subreddits", "community" to "communities". */
+fun String.plural(): String = if (endsWith("y")) dropLast(1) + "ies" else this + "s"

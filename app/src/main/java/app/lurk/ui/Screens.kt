@@ -108,7 +108,7 @@ fun FeedView(screen: FeedScreen, actions: Actions, on: PostHandlers, onViewOnWeb
             modifier = Modifier.fillMaxSize(),
         ) {
             items(screen.posts, key = { it.name }) { post ->
-                PostCard(post, screen.showsSubreddit, actions, on)
+                PostCard(post, screen.showsCommunity, actions, on)
             }
             item(key = "footer") {
                 when {
@@ -190,7 +190,7 @@ fun ThreadView(
                         more = item,
                         loading = screen.loadingMore.containsKey(item.key),
                         onClick = {
-                            if (!screen.expand(item, onMessage)) on.openLink(screen.continueUrl(item))
+                            if (!screen.expand(item, onMessage)) on.openRef(screen.continueRef(item))
                         },
                     )
                 }

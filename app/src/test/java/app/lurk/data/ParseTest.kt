@@ -30,7 +30,7 @@ class ParseTest {
 
     @Test
     fun imagePostUsesMidSizePreview() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "post_hint":"image",
             "preview":{"images":[{"source":{"url":"https://preview.redd.it/full.jpg","width":2000,"height":1000},
               "resolutions":[{"url":"https://preview.redd.it/320.jpg","width":320,"height":160},
@@ -45,7 +45,7 @@ class ParseTest {
 
     @Test
     fun galleryKeepsOrderAndSkipsInvalid() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "is_gallery":true,
             "gallery_data":{"items":[{"media_id":"b"},{"media_id":"bad"},{"media_id":"a"}]},
             "media_metadata":{
@@ -59,7 +59,7 @@ class ParseTest {
 
     @Test
     fun redditVideoHasStreams() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "is_video":true,"post_hint":"hosted:video",
             "secure_media":{"reddit_video":{"hls_url":"https://v.redd.it/v/HLSPlaylist.m3u8?a=1",
               "fallback_url":"https://v.redd.it/v/DASH_720.mp4?source=fallback",
@@ -74,7 +74,7 @@ class ParseTest {
 
     @Test
     fun crosspostedVideoComesFromParent() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "crosspost_parent_list":[{"is_video":true,"secure_media":{"reddit_video":
               {"hls_url":"https://v.redd.it/p/HLSPlaylist.m3u8","fallback_url":null,"width":10,"height":10,"duration":3,"is_gif":true}}}]""")))
         val stream = (post.media as PostMedia.Video).stream!!
@@ -85,7 +85,7 @@ class ParseTest {
 
     @Test
     fun gifvLinkUsesRedditsConversion() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "post_hint":"link",
             "preview":{"images":[],"reddit_video_preview":{"fallback_url":"https://v.redd.it/g/DASH_480.mp4",
               "hls_url":"https://v.redd.it/g/HLSPlaylist.m3u8","width":480,"height":480,"duration":5,"is_gif":true}}""")))
@@ -94,7 +94,7 @@ class ParseTest {
 
     @Test
     fun gifWithSoundIsFlagged() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "is_video":true,"secure_media":{"reddit_video":{"hls_url":"https://v.redd.it/s/HLSPlaylist.m3u8",
               "width":10,"height":10,"duration":3,"is_gif":true,"has_audio":true}}""")))
         val stream = (post.media as PostMedia.Video).stream!!
@@ -104,7 +104,7 @@ class ParseTest {
 
     @Test
     fun youtubeHasEmbedButNoStream() {
-        val post = Parse.post(JSONObject(postJson(""",
+        val post = RedditParse.post(JSONObject(postJson(""",
             "post_hint":"rich:video",
             "secure_media_embed":{"content":"<iframe width=\"356\" height=\"200\" src=\"https://www.youtube.com/embed/abc?feature=oembed\"></iframe>",
               "width":356,"height":200},
@@ -120,25 +120,25 @@ class ParseTest {
 
     @Test
     fun richVideoWithoutEmbedHasNeither() {
-        val video = Parse.post(JSONObject(postJson(""","post_hint":"rich:video""""))).media as PostMedia.Video
+        val video = RedditParse.post(JSONObject(postJson(""","post_hint":"rich:video""""))).media as PostMedia.Video
         assertNull(video.stream)
         assertNull(video.embed)
     }
 
     @Test
     fun linkPostKeepsThumbnail() {
-        val post = Parse.post(JSONObject(postJson(""","post_hint":"link"""")))
+        val post = RedditParse.post(JSONObject(postJson(""","post_hint":"link"""")))
         assertNull(post.media)
         assertEquals("https://b.thumbs.redditmedia.com/t.jpg", post.thumbnail)
     }
 
     @Test
     fun feedReadsAfterAndSkipsNonPosts() {
-        val page = Parse.feed(JSONObject("""{"kind":"Listing","data":{"after":"t3_next","children":[
+        val page = RedditParse.feed(JSONObject("""{"kind":"Listing","data":{"after":"t3_next","children":[
             {"kind":"t3","data":${postJson()}},{"kind":"t5","data":{}}]}}"""))
         assertEquals(1, page.posts.size)
         assertEquals("t3_next", page.after)
-        assertNull(Parse.feed(JSONObject("""{"data":{"after":null,"children":[]}}""")).after)
+        assertNull(RedditParse.feed(JSONObject("""{"data":{"after":null,"children":[]}}""")).after)
     }
 
     @Test
@@ -155,12 +155,12 @@ class ParseTest {
                 """{"kind":"more","data":{"name":"t1_m","id":"m","parent_id":"t3_abc","count":5,"children":["d","e"]}}""",
             )}
         ]""")
-        val data = Parse.thread(tree, "/r/pics/comments/abc/hello")
+        val data = RedditParse.thread(tree, "/r/pics/comments/abc/hello")
         assertEquals(listOf("t1_a" to 0, "t1_b" to 1, "more" to 2, "t1_c" to 0, "more" to 0),
             data.items.map { (if (it is Comment) it.name else "more") to it.depth })
         assertTrue((data.items[2] as More).children.isEmpty()) // continue-this-thread
         assertEquals(false, data.isSingleThread)
-        assertTrue(Parse.thread(tree, "/r/pics/comments/abc/hello/a").isSingleThread)
+        assertTrue(RedditParse.thread(tree, "/r/pics/comments/abc/hello/a").isSingleThread)
     }
 
     @Test
@@ -168,7 +168,7 @@ class ParseTest {
         val more = More("t1_m", listOf("d", "e", "f"), 3, depth = 2, parentName = "t1_b")
         val root = JSONObject("""{"json":{"errors":[],"data":{"things":[
             ${comment("d", "t1_b")}, ${comment("f", "t1_d")}, ${comment("e", "t1_b")}]}}}""")
-        val items = Parse.moreChildren(root, more, op = "op")
+        val items = RedditParse.moreChildren(root, more, op = "op")
         assertEquals(listOf("t1_d" to 2, "t1_f" to 3, "t1_e" to 2),
             items.map { (it as Comment).name to it.depth })
     }
@@ -187,7 +187,7 @@ class ParseTest {
               "broken":{"status":"failed","e":"AnimatedImage"},
               "vid":{"status":"valid","e":"RedditVideo","s":{"x":1,"y":1}}}}}""")
         val tree = JSONArray("[${listing("""{"kind":"t3","data":${postJson()}}""")}, ${listing(json.toString())}]")
-        val images = (Parse.thread(tree, "/r/pics/comments/abc/hello").items.single() as Comment).images.sortedBy { it.id }
+        val images = (RedditParse.thread(tree, "/r/pics/comments/abc/hello").items.single() as Comment).images.sortedBy { it.id }
         assertEquals(listOf("giphy|AbC123|downsized", "still", "upl0ad"), images.map { it.id })
         assertEquals(listOf("AbC123", "still", "upl0ad"), images.map { it.token })
         assertEquals("https://external-preview.redd.it/x.gif?s=1", images[0].url)

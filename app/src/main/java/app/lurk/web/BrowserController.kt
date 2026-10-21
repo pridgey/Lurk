@@ -12,13 +12,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * The visible, skinned WebView, used for pages without a native screen (sign-in,
- * inbox, user pages, "View on web").
+ * The visible WebView, used for pages without a native screen (sign-in, inbox,
+ * user pages, "View on web"). Old Reddit pages get the Lurk skin.
  */
 class BrowserController(
     context: Context,
     profile: String?,
     private val scripts: Scripts,
+    /** The active account's site: which links stay here, which open natively. */
+    private val links: SiteLinks,
     private val onExternal: (Uri) -> Unit,
     /** Offered links the app can show natively; returns true if it took over. */
     private val onNative: (Uri) -> Boolean,
@@ -46,28 +48,28 @@ class BrowserController(
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!request.isForMainFrame) return false
-                val decision = Links.decide(request.url)
+                val decision = links.decide(request.url)
                 // Links the user (or a page script) follows to feeds and threads go native.
                 // Server redirects don't, so "View on web" stays on the web.
                 val target = when (decision) {
-                    is Links.Decision.Rewrite -> decision.uri
-                    Links.Decision.Stay -> request.url
+                    is Decision.Rewrite -> decision.uri
+                    Decision.Stay -> request.url
                     else -> null
                 }
-                if (!request.isRedirect && target != null && Links.route(target) != null && onNative(target)) {
+                if (!request.isRedirect && target != null && links.route(target) != null && onNative(target)) {
                     return true
                 }
                 return when (decision) {
-                    Links.Decision.Stay -> false
-                    is Links.Decision.Rewrite -> {
+                    Decision.Stay -> false
+                    is Decision.Rewrite -> {
                         view.loadUrl(decision.uri.toString())
                         true
                     }
-                    Links.Decision.External -> {
+                    Decision.External -> {
                         onExternal(request.url)
                         true
                     }
-                    Links.Decision.Block -> true
+                    Decision.Block -> true
                 }
             }
 
@@ -79,7 +81,7 @@ class BrowserController(
                 }
                 onPageLoaded()
                 // Old Reddit's login page is new-style Reddit: no skin, and nobody to report yet.
-                if (!Links.isOldReddit(url) || Links.isSignInPage(url)) return
+                if (!RedditLinks.isOldReddit(url) || RedditLinks.isSignInPage(url)) return
                 // Fallback for WebViews without document-start scripts; a no-op otherwise.
                 view.evaluateJavascript(scripts.skin, null)
                 view.evaluateJavascript(scripts.whoami) { raw ->

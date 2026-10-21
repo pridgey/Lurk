@@ -16,18 +16,32 @@ import org.json.JSONObject
 data class Account(
     /** Also the WebView profile name, when profiles are supported. */
     val id: String,
+    val kind: ServiceKind = ServiceKind.Reddit,
     /** Null until the account signs in (or after it signs out). */
     val username: String? = null,
-    /** Cached so the subreddit bar appears instantly on launch; refreshed by sync. */
-    val subreddits: List<String> = emptyList(),
+    /** Cached so the community bar appears instantly on launch; refreshed by sync. */
+    val communities: List<String> = emptyList(),
     val syncedAt: Long = 0L,
     /** Set when switching to this account needs a PIN: a salted PBKDF2 hash, never the PIN itself. */
     val pinHash: String? = null,
     val pinSalt: String? = null,
     /** Show NSFW media without a tap to reveal. Spoilers still hide. */
     val showNsfw: Boolean = false,
+    /** Lemmy: the instance's host, e.g. "lemmy.world". */
+    val instance: String? = null,
+    /** Lemmy: the login token (JWT) the instance issued. Null when signed out. */
+    val token: String? = null,
 ) {
     val locked: Boolean get() = pinHash != null
+
+    /** How the account is named in menus: "u/name", "name@lemmy.world". */
+    val label: String?
+        get() = username?.let { name ->
+            when (kind) {
+                ServiceKind.Reddit -> "u/$name"
+                ServiceKind.Lemmy -> "$name@$instance"
+            }
+        }
 }
 
 /** The list of account slots and which one is active, persisted in SharedPreferences. */
@@ -63,8 +77,8 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
     /** The WebView profile for an account, or null to use the default profile. */
     fun profileFor(id: String): String? = if (multiProfile) id else null
 
-    fun add(): Account {
-        val account = newAccount()
+    fun add(kind: ServiceKind = ServiceKind.Reddit, change: (Account) -> Account = { it }): Account {
+        val account = change(newAccount().copy(kind = kind))
         accounts = accounts + account
         save()
         return account
@@ -122,7 +136,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
     fun forget(id: String) {
         runCatching { WebProfiles.wipe(profileFor(id)) }
         if (multiProfile) remove(id)
-        else update(id) { Account(id = it.id) }
+        else update(id) { Account(id = it.id, kind = it.kind, instance = it.instance) }
         if (unlockedId == id) unlockedId = null
     }
 
@@ -152,12 +166,15 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                 val subs = o.optJSONArray("subreddits") ?: JSONArray()
                 Account(
                     id = o.getString("id"),
+                    kind = ServiceKind.entries.firstOrNull { it.name == o.optString("kind") } ?: ServiceKind.Reddit,
                     username = if (o.isNull("username")) null else o.getString("username"),
-                    subreddits = (0 until subs.length()).map { subs.getString(it) },
+                    communities = (0 until subs.length()).map { subs.getString(it) },
                     syncedAt = o.optLong("syncedAt"),
                     pinHash = o.optString("pinHash").ifBlank { null },
                     pinSalt = o.optString("pinSalt").ifBlank { null },
                     showNsfw = o.optBoolean("showNsfw"),
+                    instance = o.optString("instance").ifBlank { null },
+                    token = o.optString("token").ifBlank { null },
                 )
             }
         }.getOrDefault(emptyList())
@@ -170,11 +187,14 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                 JSONObject()
                     .put("id", a.id)
                     .put("username", a.username ?: JSONObject.NULL)
-                    .put("subreddits", JSONArray(a.subreddits))
+                    .put("subreddits", JSONArray(a.communities))
                     .put("syncedAt", a.syncedAt)
                     .put("pinHash", a.pinHash ?: "")
                     .put("pinSalt", a.pinSalt ?: "")
-                    .put("showNsfw", a.showNsfw),
+                    .put("showNsfw", a.showNsfw)
+                    .put("kind", a.kind.name)
+                    .put("instance", a.instance ?: "")
+                    .put("token", a.token ?: ""),
             )
         }
         prefs.edit().putString(KEY_ACCOUNTS, arr.toString()).putString(KEY_ACTIVE, activeId).apply()
