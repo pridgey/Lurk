@@ -67,6 +67,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -224,9 +226,14 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
 
     // The top bar slides away while scrolling down a list and comes back on the way up.
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+    /** "c/linux" rather than "c/linux@lemmy.ml", unless a subscription shares the name. */
+    fun shortCommunity(name: String) = naming.community(naming.chip(name, account.communities))
     val title = when (screen) {
-        is FeedScreen -> screen.label
-        is ThreadScreen -> screen.post?.let { post -> post.community?.let(naming::community) } ?: "Comments"
+        is FeedScreen -> screen.community
+            ?.takeIf { c -> service.fixedFeeds.none { it.community == c } }
+            ?.let(::shortCommunity)
+            ?: screen.label
+        is ThreadScreen -> screen.post?.let { post -> post.community?.let(::shortCommunity) } ?: "Comments"
         is WebScreen -> links.locate(browser.url).label
     }
     val titleCommunity = when (screen) {
@@ -242,6 +249,27 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
         is ThreadScreen -> screen.post?.community?.lowercase()
         is WebScreen -> links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.community }
     }
+    // Tapping the title on a post (or a community's web page) opens that community's feed.
+    val titleTarget: String? = when (screen) {
+        is FeedScreen -> null
+        is ThreadScreen -> screen.post?.community
+        is WebScreen -> links.locate(browser.url).community
+    }
+
+    fun toggleSubscription(community: String) {
+        val label = naming.community(community)
+        if (!session.isSubscribed(community)) {
+            session.setSubscribed(community, true) { onMessage("Subscribed to $label") }
+            return
+        }
+        session.setSubscribed(community, false) {
+            scope.launch {
+                val undo = snackbar.showSnackbar("Unsubscribed from $label", actionLabel = "Undo")
+                if (undo == SnackbarResult.ActionPerformed) session.setSubscribed(community, true)
+            }
+        }
+    }
+
     if (subredditsOpen) {
         SubredditSheet(
             subreddits = account.communities,
@@ -276,7 +304,18 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                     }
                 },
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = if (titleTarget != null) {
+                            Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(onClickLabel = "Open ${naming.community(titleTarget)}") {
+                                    session.push(session.feed(titleTarget))
+                                }
+                        } else {
+                            Modifier
+                        },
+                    ) {
                         when {
                             titleCommunity != null -> Avatar(titleCommunity, 36.dp)
                             screen is FeedScreen -> HomeBadge()
@@ -292,11 +331,25 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                                 account.label ?: account.instance?.let { "Not signed in · $it" } ?: "Not signed in",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
                 },
                 actions = {
+                    if (screen is FeedScreen && session.canSubscribe(screen.community)) {
+                        val community = screen.community!!
+                        val subscribed = session.isSubscribed(community)
+                        IconButton(onClick = { toggleSubscription(community) }) {
+                            Icon(
+                                if (subscribed) Icons.Default.Check else Icons.Default.Add,
+                                contentDescription = if (subscribed) "Unsubscribe from ${naming.community(community)}"
+                                    else "Subscribe to ${naming.community(community)}",
+                                tint = if (subscribed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
                     when (screen) {
                         is FeedScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.feedSorts, { it.label }) { screen.changeSort(it) }

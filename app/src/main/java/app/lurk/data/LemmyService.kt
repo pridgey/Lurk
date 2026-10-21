@@ -222,6 +222,25 @@ class LemmyService(
         client.send("PUT", "/$type/save", JSONObject().put("${type}_id", id).put("save", saved))
     }
 
+    override suspend fun setSubscribed(community: String, subscribed: Boolean) {
+        requireSignedIn()
+        val id = communityId(community)
+        client.send("POST", "/community/follow", JSONObject().put("community_id", id).put("follow", subscribed))
+        follows = null // the next sync asks again
+    }
+
+    /** A community's id on this instance, looking it up on its home instance if this one hasn't seen it. */
+    private suspend fun communityId(name: String): Long {
+        val found = try {
+            client.get("/community", mapOf("name" to name))
+        } catch (e: LemmyError) {
+            if (e.code != "couldnt_find_community" || '@' !in name) throw e
+            client.get("/resolve_object", mapOf("q" to "!$name"))
+            client.get("/community", mapOf("name" to name))
+        }
+        return found.getJSONObject("community_view").getJSONObject("community").getLong("id")
+    }
+
     /** Invalidates the token on the instance (Lemmy 0.19+); older ones just forget it. */
     suspend fun logOut() {
         if (token != null) client.send("POST", "/user/logout", JSONObject())

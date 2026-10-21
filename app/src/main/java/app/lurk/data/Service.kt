@@ -103,6 +103,12 @@ interface Service {
 
     suspend fun setSaved(name: String, saved: Boolean)
 
+    /**
+     * Subscribes to (or leaves) [community], a name as [subscriptions] and feeds give it.
+     * Only offered for feeds that aren't [isMixed].
+     */
+    suspend fun setSubscribed(community: String, subscribed: Boolean)
+
     /** Drops anything cached for the signed-in user, after they change. */
     fun forget() {}
 

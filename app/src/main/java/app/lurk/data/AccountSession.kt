@@ -131,6 +131,37 @@ class AccountSession(
     fun thread(ref: String, preview: Post? = null): ThreadScreen =
         ThreadScreen(ref, preview, service, scope).also { it.load() }
 
+    /** Whether the signed-in account can subscribe to [community]'s feed (not Home, All, ...). */
+    fun canSubscribe(community: String?): Boolean =
+        community != null && account?.username != null && !service.isMixed(community)
+
+    fun isSubscribed(community: String): Boolean =
+        account?.communities?.any { it.equals(community, ignoreCase = true) } == true
+
+    /**
+     * Subscribes or unsubscribes, updating the bottom bar at once and putting it back if the
+     * site says no. [onDone] gets the new state once the site has it.
+     */
+    fun setSubscribed(community: String, subscribed: Boolean, onDone: (Boolean) -> Unit = {}) {
+        val before = account?.communities ?: return
+        fun apply(list: List<String>) = store.update(accountId) { it.copy(communities = list) }
+        apply(
+            if (subscribed) (before.filterNot { it.equals(community, ignoreCase = true) } + community).sortedBy { it.lowercase() }
+            else before.filterNot { it.equals(community, ignoreCase = true) },
+        )
+        scope.launch {
+            try {
+                service.setSubscribed(community, subscribed)
+                onDone(subscribed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                apply(before)
+                onMessage("Couldn't ${if (subscribed) "subscribe" else "unsubscribe"}: ${e.message}")
+            }
+        }
+    }
+
     fun push(screen: Screen) {
         stack += screen
     }

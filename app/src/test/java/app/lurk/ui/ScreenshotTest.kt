@@ -142,5 +142,12 @@ class ScreenshotTest {
     }
 
     @Test fun lemmyFeedLight() = shoot("lemmy-feed", dark = false, ::lemmySession) { it.reset(lemmyFeed(it)) }
+
+    // A community you follow: the title bar shows the subscribed check.
+    @Test fun lemmyCommunityLight() = shoot("lemmy-community", dark = false, ::lemmySession) { s ->
+        s.reset(FeedScreen("linux@lemmy.ml", s.service.feedSorts.first(), s.service, kotlinx.coroutines.MainScope()).also {
+            it.posts.addAll(posts.drop(3).map { p -> p.copy(name = "p" + p.id, community = "linux@lemmy.ml") })
+        })
+    }
     @Test fun threadDark() = shoot("thread", dark = true) { it.reset(thread(it)) }
 }

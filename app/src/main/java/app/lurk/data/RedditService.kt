@@ -170,6 +170,9 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
     override suspend fun setSaved(name: String, saved: Boolean) =
         post(if (saved) "/api/save" else "/api/unsave", mapOf("id" to name))
 
+    override suspend fun setSubscribed(community: String, subscribed: Boolean) =
+        post("/api/subscribe", mapOf("action" to if (subscribed) "sub" else "unsub", "sr_name" to community))
+
     override fun destroy() = engine.destroy()
 
     private suspend fun post(path: String, form: Map<String, String>) {
