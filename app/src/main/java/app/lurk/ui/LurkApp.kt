@@ -189,7 +189,10 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
         PostHandlers(
             openThread = { post -> session.push(session.thread(post.threadRef, post)) },
             openLink = { url -> session.openLink(url) },
-            openImage = { url -> session.viewingImage = url },
+            openImage = { url, preview ->
+                session.viewingPreview = preview?.takeIf { it != url }
+                session.viewingImage = url
+            },
             openCommunity = { name -> session.push(session.feed(name)) },
             openUser = { name -> session.openWeb(session.links.user(name)) },
             openRef = { ref -> session.push(session.thread(ref)) },
@@ -383,7 +386,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
     }
 
     session.viewingImage?.let { url ->
-        ImageViewer(url, onClose = { session.viewingImage = null })
+        ImageViewer(url, session.viewingPreview, onClose = { session.viewingImage = null })
     }
 
     session.playingFile?.let { stream ->

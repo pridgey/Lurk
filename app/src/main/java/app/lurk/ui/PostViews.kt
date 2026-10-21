@@ -65,7 +65,8 @@ import coil.compose.AsyncImage
 class PostHandlers(
     val openThread: (Post) -> Unit,
     val openLink: (String) -> Unit,
-    val openImage: (String) -> Unit,
+    /** Opens an image full screen: its full-size URL, and the smaller copy already shown, if any. */
+    val openImage: (url: String, preview: String?) -> Unit,
     val openCommunity: (String) -> Unit,
     val openUser: (String) -> Unit,
     /** Opens a thread by its ref, e.g. "continue this thread". */
@@ -321,7 +322,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
         return
     }
     when (media) {
-        is PostMedia.Image -> PictureView(media.picture, modifier) { on.openImage(media.picture.fullUrl) }
+        is PostMedia.Image -> PictureView(media.picture, modifier) { on.openImage(media.picture.fullUrl, media.picture.url) }
         is PostMedia.Video -> Box(modifier, contentAlignment = Alignment.Center) {
             val preview = media.preview
             val stream = media.stream
@@ -407,7 +408,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
         } else {
             Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 media.pictures.forEach { picture ->
-                    PictureView(picture, Modifier) { on.openImage(picture.fullUrl) }
+                    PictureView(picture, Modifier) { on.openImage(picture.fullUrl, picture.url) }
                 }
             }
         }

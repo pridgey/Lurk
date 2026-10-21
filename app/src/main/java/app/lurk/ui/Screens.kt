@@ -55,6 +55,7 @@ import app.lurk.data.FeedScreen
 import app.lurk.data.More
 import app.lurk.data.ThreadScreen
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
@@ -336,9 +337,13 @@ private fun Loading() {
     }
 }
 
-/** Full-screen image with pinch to zoom. Tap to close. */
+/**
+ * Full-screen image with pinch to zoom. Tap to close. [preview], a smaller copy already
+ * loaded in the list, shows at once and stays if the full image can't be loaded (on
+ * Lemmy the original is often on another instance, which can be slow or gone).
+ */
 @Composable
-fun ImageViewer(url: String, onClose: () -> Unit) {
+fun ImageViewer(url: String, preview: String?, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         var scale by remember { mutableFloatStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
@@ -346,12 +351,10 @@ fun ImageViewer(url: String, onClose: () -> Unit) {
             scale = (scale * zoom).coerceIn(1f, 6f)
             offset = if (scale == 1f) Offset.Zero else offset + pan
         }
+        var full by remember(url) { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
         Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
+            Box(
+                Modifier
                     .fillMaxSize()
                     .clickable(onClick = onClose)
                     .transformable(state)
@@ -361,7 +364,28 @@ fun ImageViewer(url: String, onClose: () -> Unit) {
                         translationX = offset.x
                         translationY = offset.y
                     },
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                if (preview != null && full !is AsyncImagePainter.State.Success) {
+                    AsyncImage(preview, null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                }
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    onState = { full = it },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                when {
+                    full is AsyncImagePainter.State.Loading && preview == null ->
+                        CircularProgressIndicator(Modifier.size(32.dp), color = Color.White, strokeWidth = 3.dp)
+                    full is AsyncImagePainter.State.Error && preview == null -> Text(
+                        "Couldn't load this image",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
     }
 }

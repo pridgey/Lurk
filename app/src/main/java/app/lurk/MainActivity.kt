@@ -11,6 +11,7 @@ import app.lurk.ui.LurkTheme
 import app.lurk.web.WebProfiles
 import coil.Coil
 import coil.ImageLoader
+import okhttp3.OkHttpClient
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 
@@ -24,6 +25,14 @@ class MainActivity : ComponentActivity() {
         // Animated GIFs in posts and the image viewer.
         Coil.setImageLoader(
             ImageLoader.Builder(applicationContext)
+                // Some image hosts (e.g. Lemmy and PieFed CDNs) turn away OkHttp's default user agent.
+                .okHttpClient {
+                    OkHttpClient.Builder()
+                        .addInterceptor { chain ->
+                            chain.proceed(chain.request().newBuilder().header("User-Agent", IMAGE_USER_AGENT).build())
+                        }
+                        .build()
+                }
                 .components {
                     if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
                 }
@@ -49,6 +58,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val IMAGE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36 Lurk"
         const val RELOCK_AFTER_MS = 2 * 60 * 1000L
     }
 }

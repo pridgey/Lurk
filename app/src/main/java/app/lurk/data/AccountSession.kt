@@ -68,6 +68,9 @@ class AccountSession(
     /** An image open in the full-screen viewer. */
     var viewingImage by mutableStateOf<String?>(null)
 
+    /** A smaller copy of [viewingImage] already on screen, shown until the full one loads. */
+    var viewingPreview by mutableStateOf<String?>(null)
+
     /** A post whose video is open in the full-screen player. */
     var playingVideo by mutableStateOf<Post?>(null)
 
@@ -155,6 +158,7 @@ class AccountSession(
         }
         // Image hosts, and pictrs, the image server Lemmy instances run.
         if (Links.isImage(uri) || (uri.path.orEmpty().startsWith("/pictrs/image/") && Links.isImageFile(uri))) {
+            viewingPreview = null
             viewingImage = uri.toString()
             return
         }
