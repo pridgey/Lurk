@@ -318,15 +318,18 @@ private fun CommunityCard(
                     info.title?.let {
                         Text(it, style = MaterialTheme.typography.titleSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Text(
-                        buildList {
-                            add("${compact(info.subscribers)} members")
-                            info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
-                        }.joinToString(" · "),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
+                    val stats = buildList {
+                        info.subscribers?.let { add("${compact(it)} members") }
+                        info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
+                    }
+                    if (stats.isNotEmpty()) {
+                        Text(
+                            stats.joinToString(" · "),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                     if (info.description.isNotBlank()) {
                         Text(
                             info.description,

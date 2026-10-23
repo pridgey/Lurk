@@ -222,12 +222,28 @@ class LemmyService(
         client.send("PUT", "/$type/save", JSONObject().put("${type}_id", id).put("save", saved))
     }
 
-    /** Every community the instance knows, busiest first; pages by number. */
-    override suspend fun discover(cursor: String?): CommunityPage {
+    /**
+     * Community list sorts. Lemmy ranks Top* by people active in that stretch (TopAll: by
+     * members). Its Hot and Active sorts favor brand-new communities, so they aren't offered.
+     */
+    override val discoverSorts = listOf(
+        Sort("TopMonth", "Active"),
+        Sort("TopWeek", "This week"),
+        Sort("TopAll", "Biggest"),
+        Sort("New", "Newest"),
+    )
+
+    /** Every community the instance knows; pages by number. */
+    override suspend fun discover(sort: Sort?, cursor: String?): CommunityPage {
         val page = cursor?.toIntOrNull() ?: 1
         val root = client.get(
             "/community/list",
-            mapOf("type_" to "All", "sort" to "Hot", "limit" to DISCOVER_PAGE.toString(), "page" to page.toString()),
+            mapOf(
+                "type_" to "All",
+                "sort" to (sort ?: discoverSorts.first()).key,
+                "limit" to DISCOVER_PAGE.toString(),
+                "page" to page.toString(),
+            ),
         )
         val list = root.optJSONArray("communities") ?: JSONArray()
         val communities = (0 until list.length()).map { LemmyParse.communityInfo(list.getJSONObject(it)) }

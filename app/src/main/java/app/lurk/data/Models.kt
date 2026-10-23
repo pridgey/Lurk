@@ -144,7 +144,8 @@ data class CommunityInfo(
     val title: String?,
     /** A short plain-text blurb. */
     val description: String,
-    val subscribers: Int,
+    /** Null when the site doesn't say. */
+    val subscribers: Int?,
     /** People active lately (Reddit: online now; Lemmy: this week), when the site says. */
     val activeUsers: Int?,
     val icon: String?,

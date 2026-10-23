@@ -103,8 +103,11 @@ interface Service {
 
     suspend fun setSaved(name: String, saved: Boolean)
 
-    /** A page of communities worth a look, busiest first, for Discover. */
-    suspend fun discover(cursor: String?): CommunityPage
+    /** How Discover can pick communities. First is the default. */
+    val discoverSorts: List<Sort>
+
+    /** A page of communities worth a look, for Discover. */
+    suspend fun discover(sort: Sort?, cursor: String?): CommunityPage
 
     /** The sort Discover uses to show a community's best recent posts. */
     val peekSort: Sort?

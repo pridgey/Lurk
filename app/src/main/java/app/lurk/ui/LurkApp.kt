@@ -368,7 +368,10 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                         is ThreadScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.commentSorts, { it.label }) { screen.changeSort(it) }
                         }
-                        is DiscoverScreen, is WebScreen -> Unit
+                        is DiscoverScreen -> screen.sort?.let { sort ->
+                            SortMenu(sort.label, service.discoverSorts, { it.label }) { screen.changeSort(it) }
+                        }
+                        is WebScreen -> Unit
                     }
                     AccountMenu(
                         store = store,

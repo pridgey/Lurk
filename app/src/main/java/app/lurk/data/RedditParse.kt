@@ -153,7 +153,7 @@ object RedditParse {
                 name = name,
                 title = d.str("title")?.takeIf { !it.equals(name, ignoreCase = true) },
                 description = d.str("public_description")?.trim().orEmpty(),
-                subscribers = d.optInt("subscribers"),
+                subscribers = d.optInt("subscribers", -1).takeIf { it > 0 },
                 activeUsers = d.optInt("active_user_count", -1).takeIf { it >= 0 }
                     ?: d.optInt("accounts_active", -1).takeIf { it >= 0 },
                 icon = d.str("community_icon") ?: d.str("icon_img"),

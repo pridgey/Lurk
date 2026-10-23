@@ -164,7 +164,7 @@ object LemmyParse {
             name = name,
             title = c.str("title")?.takeIf { !it.equals(c.optString("name"), ignoreCase = true) },
             description = c.str("description")?.let(Markdown::plain).orEmpty(),
-            subscribers = counts?.optInt("subscribers") ?: 0,
+            subscribers = counts?.optInt("subscribers"),
             activeUsers = counts?.optInt("users_active_week", -1)?.takeIf { it >= 0 },
             icon = c.str("icon"),
             banner = c.str("banner"),

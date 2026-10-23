@@ -87,6 +87,8 @@ class DiscoverScreen(
     var last by mutableStateOf<Swipe?>(null)
         private set
     val peeks = mutableStateMapOf<String, Peek>()
+    var sort by mutableStateOf(service.discoverSorts.firstOrNull())
+        private set
 
     class Swipe(val community: CommunityInfo, val joined: Boolean)
 
@@ -141,6 +143,12 @@ class DiscoverScreen(
     /** Reads on for more after a stretch where everything was seen or followed already. */
     fun dealMore() = topUp()
 
+    fun changeSort(newSort: Sort) {
+        if (newSort == sort) return
+        sort = newSort
+        refresh()
+    }
+
     /** Deals a fresh deck, still leaving out what's been seen. */
     fun refresh() {
         generation++
@@ -175,12 +183,13 @@ class DiscoverScreen(
                 // A page can be all seen or followed already; read on a few pages before giving up for now.
                 var pages = 0
                 while (deck.size < LOW_WATER && (pages < MAX_PAGES_PER_TOP_UP || (deck.isEmpty() && pages < MAX_PAGES_WHEN_EMPTY))) {
-                    val page = service.discover(after)
+                    val page = service.discover(sort, after)
                     if (gen != generation) return@launch
                     after = page.after
                     pages++
                     val fresh = page.communities.filter {
-                        dealt.add(it.name.lowercase()) && !it.subscribed && it.name !in seen && !leaveOut(it)
+                        dealt.add(it.name.lowercase()) && !it.subscribed && it.name !in seen &&
+                            (it.subscribers ?: MIN_MEMBERS) >= MIN_MEMBERS && !leaveOut(it)
                     }
                     deck.addAll(fresh.shuffled())
                     if (page.after == null) {
@@ -224,6 +233,8 @@ class DiscoverScreen(
         const val MAX_PAGES_PER_TOP_UP = 3
         /** With nothing left to show, read further before asking. */
         const val MAX_PAGES_WHEN_EMPTY = 8
+        /** Smaller than this isn't much of a community to suggest yet. */
+        const val MIN_MEMBERS = 10
         const val PEEK_AHEAD = 3
         const val PEEK_POSTS = 3
     }
