@@ -170,6 +170,13 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
     override suspend fun setSaved(name: String, saved: Boolean) =
         post(if (saved) "/api/save" else "/api/unsave", mapOf("id" to name))
 
+    override suspend fun discover(cursor: String?): CommunityPage =
+        RedditParse.communities(
+            getObject("/subreddits/popular.json?raw_json=1&limit=100" + (cursor?.let { "&after=$it" } ?: "")),
+        )
+
+    override val peekSort = RedditSorts.feed.first { it.key == "top:week" }
+
     override suspend fun setSubscribed(community: String, subscribed: Boolean) =
         post("/api/subscribe", mapOf("action" to if (subscribed) "sub" else "unsub", "sr_name" to community))
 

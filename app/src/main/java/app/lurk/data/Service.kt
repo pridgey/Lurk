@@ -103,6 +103,12 @@ interface Service {
 
     suspend fun setSaved(name: String, saved: Boolean)
 
+    /** A page of communities worth a look, busiest first, for Discover. */
+    suspend fun discover(cursor: String?): CommunityPage
+
+    /** The sort Discover uses to show a community's best recent posts. */
+    val peekSort: Sort?
+
     /**
      * Subscribes to (or leaves) [community], a name as [subscriptions] and feeds give it.
      * Only offered for feeds that aren't [isMixed].

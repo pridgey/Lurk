@@ -23,6 +23,7 @@ object RedditLinks : SiteLinks {
 
     override val home: String get() = "$webOrigin/"
     override val inbox: String get() = "$webOrigin/message/inbox/"
+    override val communities: String get() = "$webOrigin/subreddits/popular/"
     /**
      * Sign in on old Reddit's own login page. Old Reddit sends signed-out visitors there
      * (/login?reason=lor2), and a sign-in on www.reddit.com doesn't carry over to it.

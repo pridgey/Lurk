@@ -1,0 +1,230 @@
+package app.lurk.data
+
+import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+
+/** Communities an account has swiped past in Discover, so the deck doesn't repeat itself. Newest last. */
+class SeenCommunities(context: Context, accountId: String) {
+    private val prefs = context.getSharedPreferences("discover", Context.MODE_PRIVATE)
+    private val key = "seen:$accountId"
+    private val names = LinkedHashSet<String>().apply {
+        val saved = runCatching { JSONArray(prefs.getString(key, "[]")) }.getOrNull() ?: JSONArray()
+        for (i in 0 until saved.length()) add(saved.optString(i))
+    }
+
+    operator fun contains(name: String) = name.lowercase() in names
+
+    fun add(name: String) {
+        val n = name.lowercase()
+        names.remove(n)
+        names.add(n)
+        while (names.size > LIMIT) names.remove(names.first())
+        save()
+    }
+
+    fun remove(name: String) {
+        if (names.remove(name.lowercase())) save()
+    }
+
+    fun clear() {
+        names.clear()
+        save()
+    }
+
+    private fun save() {
+        prefs.edit().putString(key, JSONArray(names.toList()).toString()).apply()
+    }
+
+    private companion object {
+        const val LIMIT = 2_000
+    }
+}
+
+/** A few of a community's best recent posts, shown on its Discover card. */
+sealed interface Peek {
+    data object Loading : Peek
+    data class Loaded(val posts: List<Post>) : Peek
+    data object Failed : Peek
+}
+
+/**
+ * Discover: a shuffled deck of communities to swipe through. Right joins, left skips;
+ * either way the community goes on the account's seen list and won't come back
+ * (until "Start over"). The deck tops itself up from the site's busiest communities.
+ */
+class DiscoverScreen(
+    private val service: Service,
+    private val scope: CoroutineScope,
+    private val seen: SeenCommunities,
+    /** Communities to leave out: ones the account follows, or NSFW ones it hasn't opted into. */
+    private val leaveOut: (CommunityInfo) -> Boolean,
+    private val subscribe: (name: String, subscribed: Boolean) -> Unit,
+) : Screen {
+    /** The deck, top card first. */
+    val deck = mutableStateListOf<CommunityInfo>()
+    var loading by mutableStateOf(false)
+        private set
+    var error by mutableStateOf<String?>(null)
+        private set
+    /** No more pages to draw from. */
+    var exhausted by mutableStateOf(false)
+        private set
+    var joined by mutableIntStateOf(0)
+        private set
+    var skipped by mutableIntStateOf(0)
+        private set
+    /** The last swipe, which Undo takes back. */
+    var last by mutableStateOf<Swipe?>(null)
+        private set
+    val peeks = mutableStateMapOf<String, Peek>()
+
+    class Swipe(val community: CommunityInfo, val joined: Boolean)
+
+    val webUrl: String get() = service.links.communities
+
+    /** Whether the first deal has begun. */
+    var started by mutableStateOf(false)
+        private set
+
+    private var after: String? = null
+    private var generation = 0
+    private var job: Job? = null
+    /** Lowercase names already dealt this time round, so a page that repeats one doesn't deal it twice. */
+    private val dealt = HashSet<String>()
+
+    fun start() {
+        if (started) return
+        started = true
+        topUp()
+    }
+
+    /** Swipes the top card away: right joins, left skips. */
+    fun swipe(join: Boolean) {
+        val top = deck.firstOrNull() ?: return
+        deck.removeAt(0)
+        seen.add(top.name)
+        if (join) {
+            joined++
+            subscribe(top.name, true)
+        } else {
+            skipped++
+        }
+        last = Swipe(top, join)
+        topUp()
+        peekAhead()
+    }
+
+    /** Puts the last swiped card back on top, leaving the community again if it was joined. */
+    fun undo() {
+        val swipe = last ?: return
+        last = null
+        deck.add(0, swipe.community)
+        seen.remove(swipe.community.name)
+        if (swipe.joined) {
+            joined--
+            subscribe(swipe.community.name, false)
+        } else {
+            skipped--
+        }
+    }
+
+    /** Reads on for more after a stretch where everything was seen or followed already. */
+    fun dealMore() = topUp()
+
+    /** Deals a fresh deck, still leaving out what's been seen. */
+    fun refresh() {
+        generation++
+        job?.cancel()
+        deck.clear()
+        dealt.clear()
+        peeks.clear()
+        after = null
+        exhausted = false
+        loading = false
+        error = null
+        last = null
+        started = true
+        topUp()
+    }
+
+    /** Forgets everything seen and deals again from the top. */
+    fun startOver() {
+        seen.clear()
+        joined = 0
+        skipped = 0
+        refresh()
+    }
+
+    private fun topUp() {
+        if (loading || exhausted || deck.size >= LOW_WATER) return
+        val gen = generation
+        loading = true
+        error = null
+        job = scope.launch {
+            try {
+                // A page can be all seen or followed already; read on a few pages before giving up for now.
+                var pages = 0
+                while (deck.size < LOW_WATER && (pages < MAX_PAGES_PER_TOP_UP || (deck.isEmpty() && pages < MAX_PAGES_WHEN_EMPTY))) {
+                    val page = service.discover(after)
+                    if (gen != generation) return@launch
+                    after = page.after
+                    pages++
+                    val fresh = page.communities.filter {
+                        dealt.add(it.name.lowercase()) && !it.subscribed && it.name !in seen && !leaveOut(it)
+                    }
+                    deck.addAll(fresh.shuffled())
+                    if (page.after == null) {
+                        exhausted = true
+                        break
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (gen == generation) error = e.message ?: "Couldn't load communities"
+            } finally {
+                if (gen == generation) loading = false
+            }
+            if (gen == generation) peekAhead()
+        }
+    }
+
+    /** Loads the top posts for the cards about to be seen. */
+    private fun peekAhead() {
+        val sort = service.peekSort
+        deck.take(PEEK_AHEAD).forEach { community ->
+            if (peeks.containsKey(community.name)) return@forEach
+            peeks[community.name] = Peek.Loading
+            scope.launch {
+                peeks[community.name] = try {
+                    val posts = service.feed(community.name, sort, null).posts
+                    Peek.Loaded(posts.filterNot { it.stickied }.take(PEEK_POSTS))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Peek.Failed
+                }
+            }
+        }
+    }
+
+    private companion object {
+        /** Fetch more when the deck gets this low. */
+        const val LOW_WATER = 6
+        const val MAX_PAGES_PER_TOP_UP = 3
+        /** With nothing left to show, read further before asking. */
+        const val MAX_PAGES_WHEN_EMPTY = 8
+        const val PEEK_AHEAD = 3
+        const val PEEK_POSTS = 3
+    }
+}

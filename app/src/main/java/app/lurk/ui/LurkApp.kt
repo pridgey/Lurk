@@ -97,6 +97,7 @@ import app.lurk.data.Account
 import app.lurk.data.AccountSession
 import app.lurk.data.AccountStore
 import app.lurk.data.DebugLog
+import app.lurk.data.DiscoverScreen
 import app.lurk.data.FeedScreen
 import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
@@ -209,12 +210,14 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
     val currentUrl: String? = when (screen) {
         is FeedScreen -> screen.webUrl
         is ThreadScreen -> screen.webUrl
+        is DiscoverScreen -> screen.webUrl
         is WebScreen -> browser.url
     }
     val webBack = screen is WebScreen && browser.canGoBack
 
     // From a community picked in the bottom bar, Back goes Home before leaving the app.
-    val backToHome = session.stack.size == 1 && screen is FeedScreen && screen.community != null
+    val backToHome = session.stack.size == 1 &&
+        ((screen is FeedScreen && screen.community != null) || screen is DiscoverScreen)
     BackHandler(enabled = debugOpen || webBack || session.stack.size > 1 || backToHome) {
         when {
             debugOpen -> debugOpen = false
@@ -234,6 +237,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
             ?.let(::shortCommunity)
             ?: screen.label
         is ThreadScreen -> screen.post?.let { post -> post.community?.let(::shortCommunity) } ?: "Comments"
+        is DiscoverScreen -> "Discover"
         is WebScreen -> links.locate(browser.url).label
     }
     val titleCommunity = when (screen) {
@@ -241,18 +245,21 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
             service.fixedFeeds.firstOrNull { it.community == c }?.label?.lowercase() ?: c
         }
         is ThreadScreen -> screen.post?.community
+        is DiscoverScreen -> null
         is WebScreen -> null
     }
 
     val selectedFeed: String? = when (screen) {
         is FeedScreen -> if (screen.community == null) HOME_KEY else screen.community.lowercase()
         is ThreadScreen -> screen.post?.community?.lowercase()
+        is DiscoverScreen -> DISCOVER_KEY
         is WebScreen -> links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.community }
     }
     // Tapping the title on a post (or a community's web page) opens that community's feed.
     val titleTarget: String? = when (screen) {
         is FeedScreen -> null
         is ThreadScreen -> screen.post?.community
+        is DiscoverScreen -> null
         is WebScreen -> links.locate(browser.url).community
     }
 
@@ -277,10 +284,12 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
             fixedFeeds = service.fixedFeeds,
             selected = selectedFeed,
             homeKey = HOME_KEY,
+            discoverKey = DISCOVER_KEY,
             signedIn = account.username != null,
             syncing = session.syncing,
             onHome = { session.reset(session.feed(null)) },
             onSubreddit = { session.reset(session.feed(it)) },
+            onDiscover = { session.reset(session.discover()) },
             onSignIn = { session.signIn() },
             onDismiss = { subredditsOpen = false },
         )
@@ -319,8 +328,10 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                         when {
                             titleCommunity != null -> Avatar(titleCommunity, 36.dp)
                             screen is FeedScreen -> HomeBadge()
+                            screen is DiscoverScreen -> HomeBadge(LurkIcons.Compass)
                         }
-                        Column(Modifier.padding(start = if (titleCommunity != null || screen is FeedScreen) 12.dp else 0.dp)) {
+                        val badged = titleCommunity != null || screen is FeedScreen || screen is DiscoverScreen
+                        Column(Modifier.padding(start = if (badged) 12.dp else 0.dp)) {
                             Text(
                                 title,
                                 style = MaterialTheme.typography.titleLarge,
@@ -357,7 +368,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                         is ThreadScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.commentSorts, { it.label }) { screen.changeSort(it) }
                         }
-                        is WebScreen -> Unit
+                        is DiscoverScreen, is WebScreen -> Unit
                     }
                     AccountMenu(
                         store = store,
@@ -383,6 +394,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                             when (screen) {
                                 is FeedScreen -> screen.refresh()
                                 is ThreadScreen -> screen.load()
+                                is DiscoverScreen -> screen.refresh()
                                 is WebScreen -> browser.reload()
                             }
                         },
@@ -404,6 +416,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                 syncing = session.syncing,
                 onHome = { session.reset(session.feed(null)) },
                 onSubreddit = { session.reset(session.feed(it)) },
+                onDiscover = { session.reset(session.discover()) },
                 onSignIn = { session.signIn() },
                 onOpenAll = { subredditsOpen = true },
             )
@@ -424,6 +437,13 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                         onViewOnWeb = { session.openWeb(screen.webUrl) },
                     )
                     is ThreadScreen -> ThreadView(screen, session.actions, handlers, onMessage)
+                    is DiscoverScreen -> DiscoverView(
+                        screen,
+                        signedIn = account.username != null,
+                        activeLabel = if (service.kind == ServiceKind.Reddit) "online" else "active this week",
+                        onOpen = { name -> session.push(session.feed(name)) },
+                        onMessage = onMessage,
+                    )
                     is WebScreen -> WebPage(screen, browser)
                 }
             }
@@ -567,6 +587,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
 }
 
 private const val HOME_KEY = ":home" // can't clash with a community name
+private const val DISCOVER_KEY = ":discover"
 
 /**
  * The visible WebView, for a [WebScreen]. Several web screens can be on the stack but
@@ -772,6 +793,7 @@ private fun SubredditBar(
     syncing: Boolean,
     onHome: () -> Unit,
     onSubreddit: (String) -> Unit,
+    onDiscover: () -> Unit,
     onSignIn: () -> Unit,
     /** Opens the drawer with every community. */
     onOpenAll: () -> Unit,
@@ -814,6 +836,11 @@ private fun SubredditBar(
                 }
                 items(fixedFeeds, key = { "fixed:${it.community}" }) { feed ->
                     BarChip(feed.label, selected == feed.community.lowercase(), { onSubreddit(feed.community) }, avatar = feed.label.lowercase())
+                }
+                item(key = "fixed:discover") {
+                    BarChip("Discover", selected == DISCOVER_KEY, onDiscover) {
+                        Icon(LurkIcons.Compass, null, Modifier.size(18.dp))
+                    }
                 }
                 when {
                     account.username == null -> item(key = "hint:signin") {
@@ -873,9 +900,9 @@ private fun BarChip(
     }
 }
 
-/** The Home feed's title badge. */
+/** The title badge for Home, or another screen with an icon instead of a community. */
 @Composable
-private fun HomeBadge() {
+private fun HomeBadge(icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Default.Home) {
     Box(
         Modifier
             .size(36.dp)
@@ -883,7 +910,7 @@ private fun HomeBadge() {
             .background(MaterialTheme.colorScheme.primary),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Default.Home, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
     }
 }
 

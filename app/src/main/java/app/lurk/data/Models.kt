@@ -135,3 +135,23 @@ class FeedPage(val posts: List<Post>, val after: String?)
 
 class ThreadData(val post: Post, val items: List<ThreadItem>, val isSingleThread: Boolean)
 
+
+/** A community to suggest in Discover, with what its card shows. */
+data class CommunityInfo(
+    /** As feeds and subscriptions name it: "pics", "linux@lemmy.ml". */
+    val name: String,
+    /** Its display title, when it has one besides the name. */
+    val title: String?,
+    /** A short plain-text blurb. */
+    val description: String,
+    val subscribers: Int,
+    /** People active lately (Reddit: online now; Lemmy: this week), when the site says. */
+    val activeUsers: Int?,
+    val icon: String?,
+    val banner: String?,
+    val over18: Boolean,
+    val subscribed: Boolean,
+)
+
+/** [after]: the cursor for the next page, or null at the end. */
+class CommunityPage(val communities: List<CommunityInfo>, val after: String?)

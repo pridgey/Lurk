@@ -141,4 +141,32 @@ class LemmyParseTest {
         assertEquals(1714564800L, LemmyParse.time("2024-05-01T12:00:00.000000"))
         assertEquals(0L, LemmyParse.time(null))
     }
+
+    @Test
+    fun communityForDiscover() {
+        val info = LemmyParse.communityInfo(JSONObject(
+            """
+            {"community":{"id":3,"name":"linux","title":"Linux","local":false,"actor_id":"https://lemmy.ml/c/linux",
+                          "description":"# Welcome\n\nAll things **Linux**. See [the rules](https://lemmy.ml/rules).\n\n![banner](https://x/b.png)",
+                          "icon":"https://lemmy.ml/pictrs/image/icon.png","nsfw":false},
+             "counts":{"subscribers":52000,"users_active_week":3400},
+             "subscribed":"NotSubscribed"}
+            """.trimIndent(),
+        ))
+        assertEquals("linux@lemmy.ml", info.name)
+        assertNull(info.title) // same as the name
+        assertEquals("Welcome All things Linux. See the rules.", info.description)
+        assertEquals(52000, info.subscribers)
+        assertEquals(3400, info.activeUsers)
+        assertEquals("https://lemmy.ml/pictrs/image/icon.png", info.icon)
+        assertNull(info.banner)
+        assertFalse(info.subscribed)
+    }
+
+    @Test
+    fun plainTextFromMarkdown() {
+        assertEquals("A list: one two", Markdown.plain("A list:\n\n- one\n* two\n\n---"))
+        assertEquals("snake_case stays, emphasis goes", Markdown.plain("snake_case stays, *emphasis* _goes_"))
+        assertEquals("", Markdown.plain("![only an image](https://x/y.png)"))
+    }
 }

@@ -40,6 +40,17 @@ object LurkIcons {
         "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z",
         "M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2",
     )
+    val Compass = icon(
+        "Compass",
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z",
+        "M16.24 7.76l-1.8 5.41a2 2 0 0 1-1.27 1.27L7.76 16.24l1.8-5.41a2 2 0 0 1 1.27-1.27z",
+    )
+    val Undo = icon("Undo", "M9 14L4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11")
+    val Eye = icon(
+        "Eye",
+        "M2.06 12.35a1 1 0 0 1 0-0.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 0.7 10.75 10.75 0 0 1-19.88 0",
+        "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z",
+    )
     val Pause = icon("Pause", "M7 5h3v14H7z", "M14 5h3v14h-3z", filled = true)
 
     private fun icon(name: String, vararg paths: String, filled: Boolean = false): ImageVector {

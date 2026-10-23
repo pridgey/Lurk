@@ -14,6 +14,7 @@ class LemmyLinks(private val instance: String) : SiteLinks {
 
     override val home: String get() = "$origin/"
     override val inbox: String get() = "$origin/inbox"
+    override val communities: String get() = "$origin/communities"
     override fun user(name: String) = "$origin/u/$name"
 
     override fun feed(community: String?, sort: Sort?): String {

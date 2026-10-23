@@ -43,6 +43,27 @@ object Markdown {
         return md
     }
 
+    /**
+     * A blurb's Markdown as one line of plain text: images dropped, links reduced to
+     * their words, and headings, quotes, list markers and emphasis taken off.
+     */
+    fun plain(markdown: String): String =
+        prepare(markdown)
+            .replace(Regex("""!\[[^\]]*]\([^)]*\)"""), "")
+            .replace(Regex("""\[([^\]]*)]\([^)]*\)"""), "$1")
+            .lines()
+            .map { line ->
+                line.trim()
+                    .replace(Regex("""^(#{1,6}|>+|[-*+]|\d+[.)])\s+"""), "")
+                    .replace(Regex("""^([-*_]\s*){3,}$"""), "")
+                    .replace(Regex("""\*\*|__|~~|`|(?<!\w)[*_]|[*_](?!\w)"""), "")
+                    .trim()
+            }
+            .filter { it.isNotEmpty() }
+            .joinToString(" ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
     private val imgTag = Regex("""<img\s[^>]*?src="([^"]+)"[^>]*>""")
 
     /** Every image in rendered [html], so the body can show them in place. */

@@ -34,6 +34,8 @@ interface SiteLinks {
     val home: String
     /** Null if the site has no inbox page. */
     val inbox: String?
+    /** The site's own page for browsing communities. */
+    val communities: String
     fun user(name: String): String
     fun feed(community: String?, sort: Sort?): String
     /** The web page for a thread ref. */

@@ -37,6 +37,7 @@ class AccountSession(
 ) {
     private val scope = MainScope()
     private val profile = store.profileFor(accountId)
+    private val seenCommunities = SeenCommunities(context, accountId)
 
     val service: Service = store.find(accountId).let { a ->
         when (a?.kind ?: ServiceKind.Reddit) {
@@ -130,6 +131,15 @@ class AccountSession(
 
     fun thread(ref: String, preview: Post? = null): ThreadScreen =
         ThreadScreen(ref, preview, service, scope).also { it.load() }
+
+    private var discoverScreen: DiscoverScreen? = null
+
+    /** The Discover deck. One per session, so leaving and coming back keeps your place. */
+    fun discover(): DiscoverScreen = discoverScreen ?: DiscoverScreen(
+        service, scope, seenCommunities,
+        leaveOut = { c -> isSubscribed(c.name) || (c.over18 && account?.showNsfw != true) },
+        subscribe = { name, on -> setSubscribed(name, on) },
+    ).also { discoverScreen = it }
 
     /** Whether the signed-in account can subscribe to [community]'s feed (not Home, All, ...). */
     fun canSubscribe(community: String?): Boolean =
@@ -355,6 +365,7 @@ class AccountSession(
             if (!user.equals(before, ignoreCase = true)) {
                 // Signed in, out, or as someone else: what we've loaded belongs to the old state.
                 service.forget()
+                discoverScreen = null
                 if (current !is WebScreen || user != null) reset(feed(null))
             }
         } catch (e: TimeoutCancellationException) {

@@ -150,4 +150,22 @@ class ScreenshotTest {
         })
     }
     @Test fun threadDark() = shoot("thread", dark = true) { it.reset(thread(it)) }
+
+    private fun discover(s: AccountSession) = s.discover().also { d ->
+        d.deck.addAll(
+            listOf(
+                app.lurk.data.CommunityInfo(
+                    "EarthPorn", "Amazing images of light and landscape",
+                    "Pictures of the natural world. No people, no buildings, no filters.",
+                    24_000_000, 3_100, null, null, over18 = false, subscribed = false,
+                ),
+                app.lurk.data.CommunityInfo("woodworking", null, "Sawdust and joinery.", 4_200_000, 900, null, null, false, false),
+                app.lurk.data.CommunityInfo("tea", null, "Leaves, water, patience.", 600_000, 120, null, null, false, false),
+            ),
+        )
+        d.peeks["EarthPorn"] = app.lurk.data.Peek.Loaded(posts.take(3))
+    }
+
+    @Test fun discoverLight() = shoot("discover", dark = false) { it.reset(discover(it)) }
+    @Test fun discoverDark() = shoot("discover", dark = true) { it.reset(discover(it)) }
 }

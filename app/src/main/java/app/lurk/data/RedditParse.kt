@@ -136,6 +136,35 @@ object RedditParse {
         }
     }
 
+    /** A subreddit listing (/subreddits/popular.json), minus user profiles and private ones. */
+    fun communities(root: JSONObject): CommunityPage {
+        val data = root.getJSONObject("data")
+        val children = data.optJSONArray("children") ?: JSONArray()
+        val list = (0 until children.length()).mapNotNull { i ->
+            val child = children.getJSONObject(i)
+            if (child.optString("kind") != "t5") return@mapNotNull null
+            val d = child.getJSONObject("data")
+            val name = d.str("display_name") ?: return@mapNotNull null
+            val type = d.optString("subreddit_type")
+            if (name.startsWith("u_") || type == "user" || type == "private" || d.optBoolean("quarantine")) {
+                return@mapNotNull null
+            }
+            CommunityInfo(
+                name = name,
+                title = d.str("title")?.takeIf { !it.equals(name, ignoreCase = true) },
+                description = d.str("public_description")?.trim().orEmpty(),
+                subscribers = d.optInt("subscribers"),
+                activeUsers = d.optInt("active_user_count", -1).takeIf { it >= 0 }
+                    ?: d.optInt("accounts_active", -1).takeIf { it >= 0 },
+                icon = d.str("community_icon") ?: d.str("icon_img"),
+                banner = d.str("banner_background_image") ?: d.str("mobile_banner_image") ?: d.str("banner_img"),
+                over18 = d.optBoolean("over18"),
+                subscribed = d.optBoolean("user_is_subscriber"),
+            )
+        }
+        return CommunityPage(list, data.str("after"))
+    }
+
     fun post(d: JSONObject): Post {
         // Crossposts keep their media on the original post.
         val source = d.optJSONArray("crosspost_parent_list")?.optJSONObject(0) ?: d

@@ -155,6 +155,24 @@ object LemmyParse {
         return if (path.size <= 2) postName else "c" + path[path.size - 2]
     }
 
+    /** A CommunityView from /community/list, for Discover. */
+    fun communityInfo(cv: JSONObject): CommunityInfo {
+        val c = cv.getJSONObject("community")
+        val counts = cv.optJSONObject("counts")
+        val name = community(c)
+        return CommunityInfo(
+            name = name,
+            title = c.str("title")?.takeIf { !it.equals(c.optString("name"), ignoreCase = true) },
+            description = c.str("description")?.let(Markdown::plain).orEmpty(),
+            subscribers = counts?.optInt("subscribers") ?: 0,
+            activeUsers = counts?.optInt("users_active_week", -1)?.takeIf { it >= 0 },
+            icon = c.str("icon"),
+            banner = c.str("banner"),
+            over18 = c.optBoolean("nsfw"),
+            subscribed = cv.optString("subscribed") == "Subscribed",
+        )
+    }
+
     /** A community's name: "name" if it's on this instance, else "name@host". */
     fun community(c: JSONObject): String = qualified(c)
 

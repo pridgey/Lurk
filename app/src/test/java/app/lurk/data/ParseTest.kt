@@ -196,4 +196,44 @@ class ParseTest {
         assertEquals("https://preview.redd.it/still.png?s=f", images[1].fullUrl)
         assertEquals(2000 to 1000, images[1].width to images[1].height)
     }
+
+    @Test
+    fun popularSubreddits() {
+        val root = JSONObject(
+            """
+            {"kind":"Listing","data":{"after":"t5_next","children":[
+              {"kind":"t5","data":{"display_name":"EarthPorn","title":"EarthPorn: Amazing images of light and landscape",
+               "public_description":"Pictures of the natural world.","subscribers":24000000,"active_user_count":3100,
+               "community_icon":"https://styles.redditmedia.com/icon.png?width=256&s=abc","icon_img":"",
+               "banner_background_image":"https://styles.redditmedia.com/banner.jpg?s=def",
+               "over18":false,"subreddit_type":"public","user_is_subscriber":false}},
+              {"kind":"t5","data":{"display_name":"pics","title":"pics","public_description":"","subscribers":30000000,
+               "active_user_count":null,"community_icon":"","icon_img":"https://b.thumbs.redditmedia.com/pics.png",
+               "banner_background_image":"","mobile_banner_image":"https://b.thumbs.redditmedia.com/m.png",
+               "over18":false,"subreddit_type":"public","user_is_subscriber":true}},
+              {"kind":"t5","data":{"display_name":"u_someone","subreddit_type":"user","subscribers":1}},
+              {"kind":"t5","data":{"display_name":"secret","subreddit_type":"private","subscribers":5}}
+            ]}}
+            """.trimIndent(),
+        )
+        val page = RedditParse.communities(root)
+        assertEquals("t5_next", page.after)
+        assertEquals(listOf("EarthPorn", "pics"), page.communities.map { it.name })
+
+        val earth = page.communities[0]
+        assertEquals("EarthPorn: Amazing images of light and landscape", earth.title)
+        assertEquals("Pictures of the natural world.", earth.description)
+        assertEquals(24000000, earth.subscribers)
+        assertEquals(3100, earth.activeUsers)
+        assertEquals("https://styles.redditmedia.com/icon.png?width=256&s=abc", earth.icon)
+        assertEquals("https://styles.redditmedia.com/banner.jpg?s=def", earth.banner)
+        assertTrue(!earth.subscribed)
+
+        val pics = page.communities[1]
+        assertNull(pics.title) // same as the name
+        assertNull(pics.activeUsers)
+        assertEquals("https://b.thumbs.redditmedia.com/pics.png", pics.icon)
+        assertEquals("https://b.thumbs.redditmedia.com/m.png", pics.banner)
+        assertTrue(pics.subscribed)
+    }
 }

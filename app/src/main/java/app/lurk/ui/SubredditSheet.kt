@@ -52,7 +52,7 @@ import app.lurk.data.Naming
 import kotlinx.coroutines.launch
 
 /**
- * Every community at once: search, Home and the fixed feeds (Popular / All), then
+ * Every community at once: search, Home, the fixed feeds (Popular / All) and Discover, then
  * subscriptions A to Z. Typing a name you don't follow offers to go there anyway.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -64,10 +64,12 @@ fun SubredditSheet(
     /** Lowercase community name, the Home key, or null. */
     selected: String?,
     homeKey: String,
+    discoverKey: String,
     signedIn: Boolean,
     syncing: Boolean,
     onHome: () -> Unit,
     onSubreddit: (String) -> Unit,
+    onDiscover: () -> Unit,
     onSignIn: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -139,6 +141,9 @@ fun SubredditSheet(
                                 FeedTile(feed.label, selected == feed.community.lowercase(), Modifier.weight(1f), { pick { onSubreddit(feed.community) } }) {
                                     Avatar(feed.label.lowercase(), 22.dp)
                                 }
+                            }
+                            FeedTile("Discover", selected == discoverKey, Modifier.weight(1f), { pick(onDiscover) }) {
+                                Icon(LurkIcons.Compass, null, Modifier.size(22.dp))
                             }
                         }
                     }
