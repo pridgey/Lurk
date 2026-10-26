@@ -237,21 +237,20 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
     /** Sends a request to the current origin, moving to www if old Reddit turns it away. */
     private suspend fun send(path: String, form: Map<String, String>?): HttpResult {
         val result = engine.request(RedditLinks.webOrigin + path, form)
-        if (!RedditLinks.usingOld || !sentToLogin(result)) return result
+        if (result.status != 200) RedditPages.text(result.body)?.let { log.note("  page says: ${it.take(160)}") }
+        val blocked = RedditPages.isBlock(result.body)
+        if (!RedditLinks.usingOld || !(sentToLogin(result) || blocked)) return result
 
-        log.note("Old Reddit sent us to its login page; trying www.reddit.com")
+        log.note(
+            if (blocked) "Old Reddit sent its block page; trying www.reddit.com"
+            else "Old Reddit sent us to its login page; trying www.reddit.com",
+        )
         val retry = engine.request(RedditLinks.WWW_ORIGIN + path, form)
-        if (retry.status != 200 || sentToLogin(retry)) return result
+        if (retry.status != 200) RedditPages.text(retry.body)?.let { log.note("  page says: ${it.take(160)}") }
+        if (retry.status != 200 || sentToLogin(retry) || RedditPages.isBlock(retry.body)) return result
         log.note("www.reddit.com works; using it from now on")
         RedditLinks.webOrigin = RedditLinks.WWW_ORIGIN
         return retry
-    }
-
-    /** Reddit's anti-bot pages, sent instead of the data. */
-    private fun isBlockPage(body: String): Boolean {
-        if (!body.trimStart().startsWith("<")) return false // data, not a page
-        val start = body.take(20_000).lowercase()
-        return "blocked by network security" in start || "whoa there, pardner" in start
     }
 
     private fun sentToLogin(result: HttpResult): Boolean =
@@ -262,10 +261,11 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
         if (sentToLogin(result)) {
             throw ServiceException("Reddit wants you to sign in before browsing. Use the account menu to sign in.")
         }
-        if (isBlockPage(result.body)) {
+        if (RedditPages.isBlock(result.body)) {
             throw ServiceException(
-                "Reddit is blocking these requests (its \"blocked by network security\" page). " +
-                    "It's about the connection or the app, not the sign-in. Try again later or on another network.",
+                "Reddit is blocking this app's requests (\"You've been blocked by network security\"). " +
+                    "Your sign-in is fine; Reddit is turning away this connection. Try another network " +
+                    "(Wi-Fi vs mobile data), turn off any VPN or Private DNS, or wait a few hours.",
             )
         }
         when (result.status) {
@@ -276,5 +276,29 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
             429 -> throw ServiceException("Reddit is rate limiting. Wait a minute and try again.")
             else -> throw ServiceException("Reddit returned an error (${result.status}).")
         }
+    }
+}
+
+/** Reddit's HTML pages, as they come back in place of data. */
+object RedditPages {
+    /**
+     * Reddit's anti-bot pages. The "network security" one puts its message after
+     * ~190 KB of inline CSS, so the whole page is searched.
+     */
+    fun isBlock(body: String): Boolean {
+        if (!body.trimStart().startsWith("<")) return false // data, not a page
+        return body.contains("blocked by network security", ignoreCase = true) ||
+            body.contains("whoa there, pardner", ignoreCase = true)
+    }
+
+    /** A page's visible text, for the debug log. Null for data (JSON). */
+    fun text(body: String): String? {
+        if (!body.trimStart().startsWith("<")) return null
+        return body
+            .replace(Regex("<(script|style)\\b[^>]*>.*?</\\1>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)), " ")
+            .replace(Regex("<[^>]+>"), " ")
+            .replace("&#39;", "'").replace("&quot;", "\"").replace("&amp;", "&")
+            .split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+            .takeIf { it.isNotEmpty() }
     }
 }
