@@ -81,7 +81,7 @@ fun VideoSheet(
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             // Sites serve their real player to Chrome, not to "WebView".
-            settings.userAgentString = settings.userAgentString.replace("; wv", "").replace(" Version/4.0", "")
+            app.lurk.web.lookLikeChrome(settings)
         }
         FrameLayout(context).apply {
             addView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
