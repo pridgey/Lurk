@@ -103,6 +103,9 @@ import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
 import app.lurk.data.ServiceKind
 import app.lurk.data.ThreadScreen
+import app.lurk.data.UpdateState
+import app.lurk.data.Updater
+import androidx.compose.runtime.LaunchedEffect
 import app.lurk.data.WebScreen
 import app.lurk.web.BrowserController
 import app.lurk.web.Scripts
@@ -120,6 +123,17 @@ fun LurkApp(store: AccountStore) {
         { message -> scope.launch { snackbar.showSnackbar(message) } }
     }
     val onExternal: (Uri) -> Unit = remember { { uri -> openExternal(context, uri) } }
+    val updater = remember { Updater(context.applicationContext) }
+    var updateOpen by remember { mutableStateOf(false) }
+
+    // Look for a new build on launch, and say so once if there is one.
+    LaunchedEffect(updater) {
+        updater.checkIfDue()
+        val release = updater.available ?: return@LaunchedEffect
+        val go = snackbar.showSnackbar("Lurk build ${release.build} is available", actionLabel = "Update")
+        if (go == SnackbarResult.ActionPerformed) updateOpen = true
+    }
+    if (updateOpen) UpdateDialog(updater, onClose = { updater.dismiss(); updateOpen = false })
 
     // Each account gets its own session (browser + engine). Switching accounts tears
     // the old one down and builds a new one on that account's WebView profile.
@@ -156,22 +170,34 @@ fun LurkApp(store: AccountStore) {
             onDispose { session.destroy() }
         }
         CompositionLocalProvider(LocalShowNsfw provides (active?.showNsfw == true)) {
-            AccountScreen(store, session, snackbar)
+            AccountScreen(store, session, snackbar, updater, onUpdates = { updateOpen = true })
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-internal fun AccountScreen(store: AccountStore, session: AccountSession, snackbar: SnackbarHostState) {
+internal fun AccountScreen(
+    store: AccountStore,
+    session: AccountSession,
+    snackbar: SnackbarHostState,
+    updater: Updater? = null,
+    onUpdates: () -> Unit = {},
+) {
     CompositionLocalProvider(LocalNaming provides session.service.naming) {
-        AccountContent(store, session, snackbar)
+        AccountContent(store, session, snackbar, updater, onUpdates)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AccountContent(store: AccountStore, session: AccountSession, snackbar: SnackbarHostState) {
+private fun AccountContent(
+    store: AccountStore,
+    session: AccountSession,
+    snackbar: SnackbarHostState,
+    updater: Updater?,
+    onUpdates: () -> Unit,
+) {
     val browser = session.browser
     val account = session.account ?: return
     val screen = session.current
@@ -181,6 +207,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
     var settingPin by remember { mutableStateOf(false) }
     var confirmRemovePin by remember { mutableStateOf(false) }
     var addingLemmy by remember { mutableStateOf(false) }
+    var accountsOpen by remember { mutableStateOf(false) }
     val service = session.service
     val links = session.links
     val naming = service.naming
@@ -277,6 +304,42 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
         }
     }
 
+    if (accountsOpen) {
+        AccountSheet(
+            current = account,
+            accounts = store.accounts,
+            hidden = { store.needsPin(it.id) },
+            multiProfile = store.multiProfile,
+            syncing = session.syncing,
+            syncProblem = session.syncProblem,
+            authNote = session.authNote,
+            actions = AccountActions(
+                signIn = { session.signIn() },
+                retrySync = { session.requestSync() },
+                switchTo = { store.setActive(it.id) },
+                signInTo = { a ->
+                    store.requestLogin(a.id) // the new session opens on its sign-in page
+                    store.setActive(a.id)
+                },
+                addReddit = {
+                    if (!account.signedIn && !account.expired && account.kind == ServiceKind.Reddit) {
+                        session.signIn() // reuse this empty slot
+                    } else {
+                        val added = store.add(ServiceKind.Reddit)
+                        store.requestLogin(added.id)
+                        store.setActive(added.id)
+                    }
+                },
+                addLemmy = { addingLemmy = true },
+                setNsfw = { on -> store.update(account.id) { it.copy(showNsfw = on) } },
+                setPin = { settingPin = true },
+                removePin = { confirmRemovePin = true },
+                signOut = { confirmSignOut = true },
+            ),
+            onDismiss = { accountsOpen = false },
+        )
+    }
+
     if (subredditsOpen) {
         SubredditSheet(
             subreddits = account.communities,
@@ -339,7 +402,10 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                account.label ?: account.instance?.let { "Not signed in · $it" } ?: "Not signed in",
+                                when {
+                                    account.expired -> "${account.label} · signed out"
+                                    else -> account.label ?: account.instance?.let { "Not signed in · $it" } ?: "Not signed in"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -373,23 +439,10 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                         }
                         is WebScreen -> Unit
                     }
-                    AccountMenu(
-                        store = store,
+                    AccountButton(
                         current = account,
-                        onSignIn = { session.signIn() },
-                        onAddReddit = {
-                            if (account.username == null && account.kind == ServiceKind.Reddit) {
-                                session.signIn() // reuse this empty slot
-                            } else {
-                                val added = store.add(ServiceKind.Reddit)
-                                store.requestLogin(added.id)
-                                store.setActive(added.id)
-                            }
-                        },
-                        onAddLemmy = { addingLemmy = true },
-                        onSignOut = { confirmSignOut = true },
-                        onSetPin = { settingPin = true },
-                        onRemovePin = { confirmRemovePin = true },
+                        attention = account.expired || session.syncProblem != null || store.accounts.any { it.expired && !it.locked },
+                        onClick = { accountsOpen = true },
                     )
                     OverflowMenu(
                         syncing = session.syncing,
@@ -406,6 +459,13 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
                         onViewOnWeb = if (screen is WebScreen) null else ({ currentUrl?.let(session::openWeb) }),
                         onOpenOutside = { currentUrl?.let { openExternal(context, Uri.parse(it)) } },
                         onDebug = { debugOpen = true },
+                        update = updater?.state,
+                        onUpdates = updater?.let { u ->
+                            {
+                                if (u.available == null) u.startCheck()
+                                onUpdates()
+                            }
+                        },
                     )
                 },
             )
@@ -518,6 +578,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
     if (session.signingIn) {
         LemmyLoginDialog(
             instance = account.instance,
+            knownUser = account.knownAs,
             onSignedIn = { _, username, token -> session.onSignedIn(username, token) },
             onCancel = { session.signingIn = false },
         )
@@ -528,10 +589,13 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
             onSignedIn = { instance, username, token ->
                 addingLemmy = false
                 val existing = store.accounts.firstOrNull {
-                    it.kind == ServiceKind.Lemmy && it.instance == instance && it.username.equals(username, ignoreCase = true)
+                    it.kind == ServiceKind.Lemmy && it.instance == instance &&
+                        (it.username ?: it.knownAs).equals(username, ignoreCase = true)
                 }
-                if (existing != null) {
-                    store.update(existing.id) { it.copy(token = token) }
+                if (existing?.id == account.id) {
+                    session.onSignedIn(username, token) // this account, signed back in
+                } else if (existing != null) {
+                    store.update(existing.id) { it.copy(username = it.username ?: username, knownAs = username, token = token) }
                     store.setActive(existing.id)
                     onMessage("${existing.label} is already added, switched to it")
                 } else {
@@ -547,7 +611,7 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
 
     if (settingPin) {
         SetPinDialog(
-            username = account.username,
+            username = account.username ?: account.knownAs,
             onSet = { pin ->
                 settingPin = false
                 store.setPin(account.id, pin)
@@ -574,13 +638,13 @@ private fun AccountContent(store: AccountStore, session: AccountSession, snackba
     if (confirmSignOut) {
         AlertDialog(
             onDismissRequest = { confirmSignOut = false },
-            title = { Text("Sign out of ${account.label}?") },
+            title = { Text(if (account.signedIn) "Sign out of ${account.label}?" else "Remove ${account.label ?: "this account"}?") },
             text = { Text("This removes the account from Lurk on this phone. You can add it again any time.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmSignOut = false
                     session.signOut()
-                }) { Text("Sign out") }
+                }) { Text(if (account.signedIn) "Sign out" else "Remove") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") }
@@ -652,104 +716,6 @@ private fun <T> SortMenu(label: String, options: List<T>, name: (T) -> String, o
 }
 
 @Composable
-private fun AccountMenu(
-    store: AccountStore,
-    current: Account,
-    onSignIn: () -> Unit,
-    onAddReddit: () -> Unit,
-    onAddLemmy: () -> Unit,
-    onSignOut: () -> Unit,
-    onSetPin: () -> Unit,
-    onRemovePin: () -> Unit,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }) {
-            val name = current.username
-            if (name != null) {
-                Avatar(name, 32.dp)
-            } else {
-                Icon(Icons.Default.AccountCircle, contentDescription = "Accounts", modifier = Modifier.size(30.dp))
-            }
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            store.accounts.forEach { a ->
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            when {
-                                store.needsPin(a.id) -> "Private account"
-                                else -> a.label ?: a.instance?.let { "Not signed in · $it" } ?: "Not signed in"
-                            },
-                        )
-                    },
-                    leadingIcon = {
-                        if (a.id == current.id) Icon(Icons.Default.Check, contentDescription = "Active")
-                        else Spacer(Modifier.size(24.dp))
-                    },
-                    trailingIcon = if (a.locked) {
-                        { Icon(Icons.Default.Lock, contentDescription = "Needs PIN", Modifier.size(18.dp)) }
-                    } else {
-                        null
-                    },
-                    onClick = {
-                        open = false
-                        store.setActive(a.id)
-                    },
-                )
-            }
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Show NSFW without tapping") },
-                leadingIcon = {
-                    if (current.showNsfw) Icon(Icons.Default.Check, contentDescription = "On")
-                    else Spacer(Modifier.size(24.dp))
-                },
-                onClick = { open = false; store.update(current.id) { it.copy(showNsfw = !it.showNsfw) } },
-            )
-            if (current.username == null) {
-                DropdownMenuItem(text = { Text("Sign in") }, onClick = { open = false; onSignIn() })
-            }
-            if (store.multiProfile) {
-                DropdownMenuItem(
-                    text = { Text("Add Reddit account") },
-                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    onClick = { open = false; onAddReddit() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Add Lemmy account") },
-                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    onClick = { open = false; onAddLemmy() },
-                )
-            }
-            if (current.username != null) {
-                DropdownMenuItem(
-                    text = { Text(if (current.locked) "Remove PIN" else "Require PIN to switch here") },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-                    onClick = { open = false; if (current.locked) onRemovePin() else onSetPin() },
-                )
-                DropdownMenuItem(
-                    text = { Text("Sign out of ${current.label}") },
-                    onClick = { open = false; onSignOut() },
-                )
-            }
-            if (!store.multiProfile) {
-                DropdownMenuItem(
-                    text = {
-                        Text(
-                            "Multiple accounts need a newer Android System WebView",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    },
-                    enabled = false,
-                    onClick = {},
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun OverflowMenu(
     syncing: Boolean,
     onRefresh: () -> Unit,
@@ -760,13 +726,37 @@ private fun OverflowMenu(
     onViewOnWeb: (() -> Unit)?,
     onOpenOutside: () -> Unit,
     onDebug: () -> Unit,
+    update: UpdateState?,
+    /** Null where updates aren't offered (previews). */
+    onUpdates: (() -> Unit)?,
 ) {
     var open by remember { mutableStateOf(false) }
+    val updateWaiting = update is UpdateState.Available || update is UpdateState.Downloading || update is UpdateState.Installing
     Box {
         IconButton(onClick = { open = true }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "More")
+            Box {
+                Icon(Icons.Default.MoreVert, contentDescription = if (updateWaiting) "More, update available" else "More")
+                if (updateWaiting) AttentionDot(Modifier.align(Alignment.TopEnd), 9.dp)
+            }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (onUpdates != null && updateWaiting) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            when (update) {
+                                is UpdateState.Downloading -> "Downloading update… ${update.progress?.let { "${(it * 100).toInt()}%" } ?: ""}"
+                                is UpdateState.Installing -> "Installing update…"
+                                is UpdateState.Available -> "Update to build ${update.release.build}"
+                                else -> "Update"
+                            },
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                    onClick = { open = false; onUpdates() },
+                )
+                HorizontalDivider()
+            }
             DropdownMenuItem(text = { Text("Refresh page") }, onClick = { open = false; onRefresh() })
             DropdownMenuItem(
                 text = { Text(if (syncing) "Syncing subscriptions…" else "Sync subscriptions") },
@@ -781,6 +771,9 @@ private fun OverflowMenu(
             }
             DropdownMenuItem(text = { Text("Open in browser") }, onClick = { open = false; onOpenOutside() })
             HorizontalDivider()
+            if (onUpdates != null && !updateWaiting) {
+                DropdownMenuItem(text = { Text("Check for updates") }, onClick = { open = false; onUpdates() })
+            }
             DropdownMenuItem(text = { Text("Engine debug") }, onClick = { open = false; onDebug() })
         }
     }
@@ -846,7 +839,10 @@ private fun SubredditBar(
                     }
                 }
                 when {
-                    account.username == null -> item(key = "hint:signin") {
+                    account.expired -> item(key = "hint:signin") {
+                        BarChip("Signed out · Sign in again", false, onSignIn, accent = true)
+                    }
+                    !account.signedIn -> item(key = "hint:signin") {
                         BarChip("Sign in to see your ${naming.communityNoun.plural()}", false, onSignIn, accent = true)
                     }
                     account.communities.isEmpty() && syncing -> item(key = "hint:loading") {

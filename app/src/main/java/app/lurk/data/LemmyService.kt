@@ -86,7 +86,11 @@ class LemmyService(
     /** Subscriptions from the last [whoAmI], which the site info includes. */
     private var follows: List<String>? = null
 
+    override var authNote: String? = null
+        private set
+
     override suspend fun whoAmI(): String? {
+        authNote = null
         val site = try {
             client.get("/site")
         } catch (e: LemmyError) {
@@ -292,6 +296,7 @@ class LemmyService(
 
     private fun rejectToken() {
         log.note("$instance no longer accepts the login token")
+        authNote = "$instance no longer accepts this sign-in. Tokens end after a password change or when they expire."
         token = null
         onTokenRejected()
     }

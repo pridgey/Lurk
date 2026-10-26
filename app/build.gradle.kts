@@ -12,8 +12,11 @@ android {
         applicationId = "app.lurk"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        // CI stamps each build with its run number (the N in Lurk-N.apk), which the in-app
+        // updater compares against the latest release. Local builds are build 1.
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "build $build"
     }
 
     // Permanent release key, supplied by CI (see .github/workflows/build-apk.yml).

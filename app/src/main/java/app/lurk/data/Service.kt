@@ -77,8 +77,18 @@ interface Service {
     /** A hidden WebView that does the work, if the service uses one; shown in Engine debug. */
     val engineView: WebView? get() = null
 
-    /** The signed-in username, or null when signed out. */
+    /**
+     * The signed-in username, or null when the site clearly says nobody is signed in.
+     * Throws when it can't tell (no connection, rate limited, blocked, an error page), so
+     * a bad moment never looks like a sign-out.
+     */
     suspend fun whoAmI(): String?
+
+    /**
+     * Anything off about the sign-in found by the last [whoAmI], in plain words: why it
+     * looks signed out, or that the account is suspended. Null when all is well.
+     */
+    val authNote: String? get() = null
 
     /** Subscribed communities, alphabetical. */
     suspend fun subscriptions(): List<String>

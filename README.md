@@ -5,7 +5,8 @@ A personal Reddit and Lemmy client for Android. Reddit runs on the Reddit websit
 - **Native screens, fed by a hidden browser.** Feeds, posts and comment threads are native Compose screens. Their data comes from a hidden "engine" WebView that asks Reddit for the JSON version of each page (the same URL with `.json` on the end) using your own signed-in cookies. Votes and saves go through the engine the same way the old Reddit site sends them.
 - **Old Reddit first, www when it has to.** The engine starts on old.reddit.com. Old Reddit now sends some accounts to its login page (`/login?reason=lor2`) even when they're signed in; when that happens the app retries on www.reddit.com and uses it from then on, for data and web pages alike.
 - **Your subreddits, automatically.** The engine reads your username (`/api/me.json`) and subscriptions (`/subreddits/mine/subscriber.json`) and fills the subreddit bar along the bottom. It resyncs on launch, after you sign in, and whenever the app notices you signed in or out.
-- **Multiple accounts.** Each account lives in its own WebView profile (separate cookies), so you can switch between them from the account menu without signing out.
+- **Multiple accounts.** Each account lives in its own WebView profile (separate cookies), so you can switch between them from the account menu without signing out. Tap your avatar for the account sheet: the current account and how its sign-in is doing, its settings (NSFW, PIN), the other accounts, and adding one.
+- **Expired sign-ins.** When a site ends a sign-in, the account keeps its name, settings and cached subscriptions, shows **Signed out** with the reason, and gets a **Sign in again** button (avatar dot, top-bar subtitle and bottom-bar chip point to it too). An account is only marked signed out when the site clearly says nobody is signed in; if the check fails (offline, rate limited, Reddit's "blocked by network security" page), nothing changes and the sheet says why, with **Try again**.
 - **Lemmy too.** **Account menu → Add Lemmy account** signs in to any Lemmy instance with username and password (and a two-factor code if you use one). A Lemmy account works like a Reddit one: Home is your subscriptions, **Local** and **All** sit where Popular and All do, and your communities fill the bottom bar. Data comes straight from the instance's API (v3, which Lemmy 0.19 serves and 1.0 still accepts), not through a hidden browser. Links to posts and communities on other instances open natively; the instance looks them up. Spoiler blocks show as labeled quotes for now.
 - **Subscribing.** On a subreddit or community feed, the **+** in the title bar subscribes (it turns into a ✓; tap again to unsubscribe, with Undo). The bottom bar updates right away. On a post, tap the title bar to go to its community.
 - **Discover.** The **Discover** chip in the bottom bar (or tile in the drawer) deals a shuffled deck of busy subreddits or communities you don't follow yet. Each card shows its banner, size, blurb and its top posts this week. Swipe right (or **+**) to join, left (or **✕**) to skip, tap a card to look inside; **↶** takes back the last swipe. Cards you've swiped don't come back until **Start over**. NSFW communities only appear if the account shows NSFW without tapping. The sort menu picks where cards come from: Popular or Newest on Reddit (`/subreddits/popular`, `/subreddits/new`); Active (this month), This week, Biggest or Newest on Lemmy. Communities under 10 members are left out.
@@ -31,6 +32,7 @@ Lemmy: use the form in the app. Lurk sends your password only to your instance a
 Reddit changes its pages from time to time. Open **⋮ → Engine debug** to see the hidden engine's log and the start of the last response. **Copy** puts all of it on the clipboard. Each sync logs which cookies the account has (names only) and whether Reddit's login cookie is there.
 
 - **Feeds or threads show an error:** Engine debug lists each request the engine made, its HTTP status, and the start of the last response. Reddit's JSON format rarely changes; the parsing lives in `data/RedditParse.kt` and is covered by `app/src/test/.../ParseTest.kt`. Lemmy's is in `data/LemmyParse.kt` (`LemmyParseTest.kt`); Lemmy accounts log each API request the same way.
+- **Signed out, or blocked?** The account sheet says which. "Sign-in cookie is gone" means it expired; "no longer accepts this sign-in" means Reddit revoked it (password change, signing out everywhere); "Couldn't check the sign-in" with a blocked or rate-limit message means Reddit is turning the app's requests away, not your account. "Suspended" comes straight from Reddit.
 - **Signed in but the app says you aren't:** check the sync lines in Engine debug. "Login cookie: missing" means the sign-in didn't stick; "present" with "Signed in as: nobody" means Reddit isn't accepting it on either old Reddit or www.
 - **Pages look wrong:** adjust `assets/skin/skin.css`. It's plain CSS against old Reddit's markup; testing changes in a desktop browser with the Stylus extension first is fastest.
 
@@ -66,6 +68,14 @@ To look at the screens without a phone, run `./gradlew testDebugUnitTest --tests
 ## Being a good citizen
 
 The engine only requests what you're looking at (a page of 25 posts as you scroll, one thread when you open it), waits at least 0.8 s between requests, and uses your own signed-in session. Keep it that way: Reddit's terms restrict automated access, and heavy background scraping is the quickest way to get an account flagged.
+
+## Updating from inside the app
+
+Lurk checks the repo's **latest** release on launch (at most every 6 hours) and from **⋮ → Check for updates**. If the release's `Lurk-<n>.apk` is newer than the installed build, a snackbar and a dot on **⋮** offer it; the update dialog shows recent changes, downloads the APK (checked against the size and SHA-256 GitHub reports) and hands it to Android's installer. The first time, Android asks you to allow Lurk to install apps.
+
+- The check uses GitHub's API without signing in, so the repo has to be public.
+- Each CI build's `versionCode` is its run number (`GITHUB_RUN_NUMBER`); local builds are build 1 and don't check automatically.
+- Android only installs an update signed with the same key as the installed app. A debug or locally built install has to be uninstalled once before the release APK can update it.
 
 ## Getting the APK from GitHub
 

@@ -16,6 +16,8 @@ import app.lurk.data.Post
 import app.lurk.data.PostMedia
 import app.lurk.data.ThreadScreen
 import app.lurk.web.Scripts
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import java.io.File
 import org.junit.Rule
 import org.junit.Test
@@ -168,4 +170,51 @@ class ScreenshotTest {
 
     @Test fun discoverLight() = shoot("discover", dark = false) { it.reset(discover(it)) }
     @Test fun discoverDark() = shoot("discover", dark = true) { it.reset(discover(it)) }
+
+    // The account sheet's contents (the sheet itself draws in its own window, which isn't captured).
+    private fun shootSheet(name: String, dark: Boolean, current: app.lurk.data.Account, syncProblem: String? = null, authNote: String? = null) {
+        val others = listOf(
+            app.lurk.data.Account("b", username = "night_owl", knownAs = "night_owl"),
+            app.lurk.data.Account("c", knownAs = "old_throwaway"),
+            app.lurk.data.Account("d", kind = app.lurk.data.ServiceKind.Lemmy, username = "lurker", knownAs = "lurker", instance = "lemmy.world"),
+            app.lurk.data.Account("e", username = "secret", pinHash = "x", pinSalt = "y"),
+        )
+        val noop = {}
+        val actions = AccountActions(noop, noop, {}, {}, noop, noop, {}, noop, noop, noop)
+        compose.setContent {
+            LurkTheme(darkOverride = dark) {
+                androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow) {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(top = 24.dp)) {
+                        AccountSheetContent(
+                            current, listOf(current) + others, hidden = { it.id == "e" }, multiProfile = true,
+                            syncing = false, syncProblem = syncProblem, authNote = authNote, actions = actions, pick = { it() },
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        val view = compose.activity.window.decorView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        view.draw(android.graphics.Canvas(bitmap))
+        val dir = File("build/screenshots").apply { mkdirs() }
+        File(dir, "$name-${if (dark) "dark" else "light"}.png").outputStream().use {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
+    private val alice = app.lurk.data.Account(
+        "a", username = "alice", knownAs = "alice", syncedAt = System.currentTimeMillis() - 5 * 60_000, showNsfw = true,
+    )
+
+    @Test fun accountsLight() = shootSheet("accounts", dark = false, alice)
+    @Test fun accountsDark() = shootSheet("accounts", dark = true, alice)
+    @Test fun accountsExpiredLight() = shootSheet(
+        "accounts-expired", dark = false, alice.copy(username = null),
+        authNote = "Reddit's sign-in cookie is gone. Sign-ins expire after a while; signing in again fixes it.",
+    )
+    @Test fun accountsProblemDark() = shootSheet(
+        "accounts-problem", dark = true, alice,
+        syncProblem = "Reddit is rate limiting. Wait a minute and try again.",
+    )
 }

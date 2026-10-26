@@ -6,6 +6,7 @@ import app.lurk.web.HttpResult
 import app.lurk.web.RedditEngine
 import app.lurk.web.RedditLinks
 import app.lurk.web.Scripts
+import app.lurk.web.WebProfiles
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -89,12 +90,31 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
         modhash = null
     }
 
+    override var authNote: String? = null
+        private set
+
     override suspend fun whoAmI(): String? {
         engine.logCookies()
-        val name = try {
-            getObject("/api/me.json").optJSONObject("data")?.optString("name")?.takeIf { it.isNotBlank() }
-        } catch (e: ServiceException) {
-            null // signed-out visitors get sent to the login page
+        authNote = null
+        val result = send("/api/me.json", null)
+        // Signed-out visitors get sent to the login page (old Reddit) or a 401.
+        val name = if (sentToLogin(result) || result.status == 401) {
+            null
+        } else {
+            check(result) // can't tell: no connection, rate limited, blocked...
+            val data = parseJson(result) as? JSONObject
+                ?: throw ServiceException("Reddit sent something unexpected")
+            val me = data.optJSONObject("data")
+            if (me?.optBoolean("is_suspended") == true) authNote = "Reddit has suspended this account."
+            me?.optString("name")?.takeIf { it.isNotBlank() }
+        }
+        if (name == null) {
+            authNote = if (WebProfiles.loginCookie(engine.webView) == null) {
+                "Reddit's sign-in cookie is gone. Sign-ins expire after a while; signing in again fixes it."
+            } else {
+                "Reddit no longer accepts this sign-in. This happens after a password change, " +
+                    "signing out everywhere, or when Reddit asks for a fresh sign-in."
+            }
         }
         log.note("Signed in as: ${name?.let { "u/$it" } ?: "nobody"} (via ${RedditLinks.webOrigin.removePrefix("https://")})")
         return name
@@ -206,10 +226,13 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
     private suspend fun getJson(pathAndQuery: String): Any {
         val result = send(pathAndQuery, null)
         check(result)
-        return runCatching { org.json.JSONTokener(result.body).nextValue() }.getOrNull()
+        return parseJson(result)
+    }
+
+    private fun parseJson(result: HttpResult): Any =
+        runCatching { org.json.JSONTokener(result.body).nextValue() }.getOrNull()
             ?.takeIf { it is JSONObject || it is JSONArray }
             ?: throw ServiceException("Reddit sent a web page instead of data. Try \"View on web\".")
-    }
 
     /** Sends a request to the current origin, moving to www if old Reddit turns it away. */
     private suspend fun send(path: String, form: Map<String, String>?): HttpResult {
@@ -224,6 +247,13 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
         return retry
     }
 
+    /** Reddit's anti-bot pages, sent instead of the data. */
+    private fun isBlockPage(body: String): Boolean {
+        if (!body.trimStart().startsWith("<")) return false // data, not a page
+        val start = body.take(20_000).lowercase()
+        return "blocked by network security" in start || "whoa there, pardner" in start
+    }
+
     private fun sentToLogin(result: HttpResult): Boolean =
         android.net.Uri.parse(result.url).path.orEmpty().startsWith("/login")
 
@@ -231,6 +261,12 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
         // Reddit sends signed-out visitors it doesn't trust to the login page instead.
         if (sentToLogin(result)) {
             throw ServiceException("Reddit wants you to sign in before browsing. Use the account menu to sign in.")
+        }
+        if (isBlockPage(result.body)) {
+            throw ServiceException(
+                "Reddit is blocking these requests (its \"blocked by network security\" page). " +
+                    "It's about the connection or the app, not the sign-in. Try again later or on another network.",
+            )
         }
         when (result.status) {
             200 -> Unit

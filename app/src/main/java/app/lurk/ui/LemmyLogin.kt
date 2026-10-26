@@ -31,18 +31,20 @@ import kotlinx.coroutines.launch
 
 /**
  * Signs in to a Lemmy instance with username and password (plus a two-factor code if the
- * account has one). [instance] fixes the instance, for signing an existing account back in.
+ * account has one). [instance] fixes the instance, for signing an existing account back in;
+ * [knownUser] fills in its username.
  * The password goes only to the instance; Lurk keeps the token it sends back.
  */
 @Composable
 fun LemmyLoginDialog(
     instance: String?,
+    knownUser: String? = null,
     onSignedIn: (instance: String, username: String, token: String) -> Unit,
     onCancel: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var host by remember { mutableStateOf(instance.orEmpty()) }
-    var username by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf(knownUser.orEmpty()) }
     var password by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var needsCode by remember { mutableStateOf(false) }

@@ -106,6 +106,14 @@ class AccountSession(
     var syncing by mutableStateOf(false)
         private set
 
+    /** Why the last sync couldn't check the sign-in (offline, rate limited, blocked). Null after one works. */
+    var syncProblem by mutableStateOf<String?>(null)
+        private set
+
+    /** What the last sync learned about the sign-in, e.g. why it ended. See [Service.authNote]. */
+    var authNote by mutableStateOf<String?>(null)
+        private set
+
     private var seenPageUser = false
     private var lastPageUser: String? = null
 
@@ -244,6 +252,7 @@ class AccountSession(
 
     /** Starts signing in: the site's sign-in page, or Lurk's form. */
     fun signIn() {
+        account?.takeIf { it.expired }?.label?.let { onMessage("Sign in as $it") }
         when (val way = service.signIn) {
             is SignIn.Web -> openWeb(way.url)
             SignIn.Form -> signingIn = true
@@ -254,17 +263,17 @@ class AccountSession(
     fun onSignedIn(username: String, token: String) {
         signingIn = false
         (service as? LemmyService)?.token = token
-        store.update(accountId) { it.copy(username = username, token = token) }
+        store.update(accountId) { it.copy(username = username, knownAs = username, token = token) }
         shareLemmyLogin()
         requestSync()
     }
 
     /** The instance no longer accepts this account's token: it's signed out. */
     private fun onLemmyTokenRejected() {
-        store.update(accountId) { it.copy(token = null) }
+        store.expire(accountId)
     }
 
-    /** Signs this account out on this device: wipes its cookies and removes it. */
+    /** Signs this account out on this device (or removes a signed-out one): wipes its cookies and removes it. */
     fun signOut() {
         val name = account?.label
         (service as? LemmyService)?.let { lemmy -> scope.launch { runCatching { lemmy.logOut() } } }
@@ -273,7 +282,7 @@ class AccountSession(
             WebProfiles.wipe(profile)
         } else {
             WebProfiles.wipe(null)
-            store.update(accountId) { it.copy(username = null, communities = emptyList(), token = null) }
+            store.update(accountId) { it.copy(username = null, knownAs = null, communities = emptyList(), token = null) }
             service.forget()
             reset(feed(null))
         }
@@ -288,7 +297,7 @@ class AccountSession(
      * finished, even if the page itself (e.g. old Reddit's login wall) doesn't show it.
      */
     private fun onWebPageLoaded() {
-        if (service.kind != ServiceKind.Reddit || account?.username != null) return
+        if (service.kind != ServiceKind.Reddit || account?.signedIn == true) return
         val cookie = WebProfiles.loginCookie(browser.webView) ?: return
         if (cookie == lastLoginCookie) return
         lastLoginCookie = cookie
@@ -335,16 +344,18 @@ class AccountSession(
         try {
             service.log.note("Sync started")
             val user = service.whoAmI()
-            val communities = if (user != null) service.subscriptions() else emptyList()
-            service.log.note("Sync done: ${user?.let { service.naming.user(it) } ?: "signed out"}, ${communities.size} subscriptions")
+            val communities = if (user != null) service.subscriptions() else null
+            service.log.note("Sync done: ${user?.let { service.naming.user(it) } ?: "signed out"}, ${communities?.size ?: 0} subscriptions")
+            syncProblem = null
+            authNote = service.authNote
 
+            val me = account ?: return
             if (user != null) {
-                val me = account
                 val existing = store.accounts.firstOrNull {
-                    it.id != accountId && it.kind == me?.kind && it.instance == me.instance &&
-                        it.username.equals(user, ignoreCase = true)
+                    it.id != accountId && it.kind == me.kind && it.instance == me.instance &&
+                        (it.username ?: it.knownAs).equals(user, ignoreCase = true)
                 }
-                if (existing != null) {
+                if (existing?.signedIn == true) {
                     // Signed into an account that's already added: switch to it, drop this slot.
                     onMessage("${existing.label} is already added, switched to it")
                     store.setActive(existing.id)
@@ -352,15 +363,27 @@ class AccountSession(
                     WebProfiles.wipe(profile)
                     return
                 }
+                // A signed-out copy of this account: this slot replaces it, keeping its settings.
+                if (existing != null) store.absorb(from = existing.id, into = accountId)
             }
 
-            val before = account?.username
-            store.update(accountId) {
-                it.copy(
-                    username = user,
-                    communities = communities,
-                    syncedAt = System.currentTimeMillis(),
-                )
+            val before = me.username
+            if (user == null) {
+                if (before != null) {
+                    service.log.note("Sign-in ended for ${me.label}")
+                    onMessage("${me.label} was signed out. Open the account menu to sign in again.")
+                }
+                store.expire(accountId) // keeps the name and cached communities
+                store.update(accountId) { it.copy(syncedAt = System.currentTimeMillis()) }
+            } else {
+                store.update(accountId) {
+                    it.copy(
+                        username = user,
+                        knownAs = user,
+                        communities = communities.orEmpty(),
+                        syncedAt = System.currentTimeMillis(),
+                    )
+                }
             }
             if (!user.equals(before, ignoreCase = true)) {
                 // Signed in, out, or as someone else: what we've loaded belongs to the old state.
@@ -369,10 +392,12 @@ class AccountSession(
                 if (current !is WebScreen || user != null) reset(feed(null))
             }
         } catch (e: TimeoutCancellationException) {
+            syncProblem = "Couldn't reach the site in time. Check your connection."
             onMessage("Sync timed out. Check your connection.")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            syncProblem = e.message ?: "Sync failed."
             onMessage("Sync failed: ${e.message}")
         }
     }

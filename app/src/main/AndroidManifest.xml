@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- In-app updates from the repo's GitHub releases (⋮ > Check for updates). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="false"
@@ -24,6 +26,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Android's installer reports back here when an in-app update finishes. -->
+        <receiver
+            android:name=".data.InstallResultReceiver"
+            android:exported="false" />
 
         <!-- Hands copied images to whatever app they're pasted into. -->
         <provider

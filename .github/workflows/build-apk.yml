@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 20 # recent commits go in the release notes
 
       - uses: gradle/actions/wrapper-validation@v4
 
@@ -58,8 +60,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The app's updater reads this release: the build number from the APK's name
+          # (Lurk-<n>.apk) and the "- " lines below as recent changes.
+          {
+            echo "Built from ${{ github.sha }}. Download the .apk below and sideload it, or update from inside Lurk."
+            echo
+            echo "Recent changes:"
+            git log -10 --format='- %s'
+          } > notes.md
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest out/*.apk \
             --title "Lurk (build ${{ github.run_number }})" \
-            --notes "Built from ${{ github.sha }}. Download the .apk below and sideload it." \
+            --notes-file notes.md \
             --target "${{ github.sha }}"

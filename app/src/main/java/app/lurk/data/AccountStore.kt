@@ -17,8 +17,14 @@ data class Account(
     /** Also the WebView profile name, when profiles are supported. */
     val id: String,
     val kind: ServiceKind = ServiceKind.Reddit,
-    /** Null until the account signs in (or after it signs out). */
+    /** Who's signed in right now. Null until the account signs in, or once its sign-in ends. */
     val username: String? = null,
+    /**
+     * Who this account was last signed in as. Kept when the site ends the sign-in (it
+     * expired, or the site stopped accepting it), so the account still has a name and
+     * can be signed back in. Cleared only by signing out on purpose.
+     */
+    val knownAs: String? = null,
     /** Cached so the community bar appears instantly on launch; refreshed by sync. */
     val communities: List<String> = emptyList(),
     val syncedAt: Long = 0L,
@@ -34,9 +40,21 @@ data class Account(
 ) {
     val locked: Boolean get() = pinHash != null
 
-    /** How the account is named in menus: "u/name", "name@lemmy.world". */
+    val signedIn: Boolean get() = username != null
+
+    /** Was signed in, but the site has ended that sign-in. */
+    val expired: Boolean get() = username == null && knownAs != null
+
+    /** Where the account lives: "Reddit", "lemmy.world". */
+    val siteName: String
+        get() = when (kind) {
+            ServiceKind.Reddit -> "Reddit"
+            ServiceKind.Lemmy -> instance ?: "Lemmy"
+        }
+
+    /** How the account is named in menus: "u/name", "name@lemmy.world". Kept while [expired]. */
     val label: String?
-        get() = username?.let { name ->
+        get() = (username ?: knownAs)?.let { name ->
             when (kind) {
                 ServiceKind.Reddit -> "u/$name"
                 ServiceKind.Lemmy -> "$name@$instance"
@@ -127,6 +145,23 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
 
     fun clearPin(id: String) = update(id) { it.copy(pinHash = null, pinSalt = null) }
 
+    /** The site ended [id]'s sign-in. Keeps its name, settings and cached communities. */
+    fun expire(id: String) = update(id) {
+        if (it.username == null) it else it.copy(username = null, knownAs = it.username, token = null)
+    }
+
+    /**
+     * [from] is a signed-out copy of the account now signed in as [into]: moves its
+     * settings (PIN included; signing in just proved who this is) over, then drops it.
+     */
+    fun absorb(from: String, into: String) {
+        val old = find(from) ?: return
+        update(into) { it.copy(pinHash = old.pinHash, pinSalt = old.pinSalt, showNsfw = old.showNsfw) }
+        if (old.locked) unlockedId = into
+        runCatching { WebProfiles.wipe(profileFor(from)) }
+        remove(from)
+    }
+
     /** An account to show instead of a locked one: the one before it, or any without a PIN. */
     fun elsewhere(): String? =
         previousId?.takeIf { it != activeId && find(it)?.locked == false }
@@ -168,6 +203,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     id = o.getString("id"),
                     kind = ServiceKind.entries.firstOrNull { it.name == o.optString("kind") } ?: ServiceKind.Reddit,
                     username = if (o.isNull("username")) null else o.getString("username"),
+                    knownAs = o.optString("knownAs").ifBlank { null },
                     communities = (0 until subs.length()).map { subs.getString(it) },
                     syncedAt = o.optLong("syncedAt"),
                     pinHash = o.optString("pinHash").ifBlank { null },
@@ -187,6 +223,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                 JSONObject()
                     .put("id", a.id)
                     .put("username", a.username ?: JSONObject.NULL)
+                    .put("knownAs", a.knownAs ?: "")
                     .put("subreddits", JSONArray(a.communities))
                     .put("syncedAt", a.syncedAt)
                     .put("pinHash", a.pinHash ?: "")
