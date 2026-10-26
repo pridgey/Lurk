@@ -83,6 +83,7 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
 
     init {
         RedditLinks.webOrigin = RedditLinks.OLD_ORIGIN
+        RedditAccess.init(context)
     }
 
     /** Keeps the origin, which the sign-in check just chose. */
@@ -236,6 +237,8 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
 
     /** Sends a request to the current origin, moving to www if old Reddit turns it away. */
     private suspend fun send(path: String, form: Map<String, String>?): HttpResult {
+        // Blocked: don't keep asking. The screens open Reddit in Chrome instead.
+        if (RedditAccess.inChrome) throw ServiceException(BLOCKED)
         val result = engine.request(RedditLinks.webOrigin + path, form)
         if (result.status != 200) RedditPages.text(result.body)?.let { log.note("  page says: ${it.take(160)}") }
         val blocked = RedditPages.isBlock(result.body)
@@ -262,11 +265,9 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
             throw ServiceException("Reddit wants you to sign in before browsing. Use the account menu to sign in.")
         }
         if (RedditPages.isBlock(result.body)) {
-            throw ServiceException(
-                "Reddit is blocking this app's requests (\"You've been blocked by network security\"). " +
-                    "Your sign-in is fine; Reddit is turning away this connection. Try another network " +
-                    "(Wi-Fi vs mobile data), turn off any VPN or Private DNS, or wait a few hours.",
-            )
+            log.note("Reddit is blocking Lurk's browser; Reddit opens in Chrome from now on")
+            RedditAccess.blocked()
+            throw ServiceException(BLOCKED)
         }
         when (result.status) {
             200 -> Unit
@@ -278,6 +279,10 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
         }
     }
 }
+
+private const val BLOCKED =
+    "Reddit is blocking Lurk's built-in browser (\"You've been blocked by network security\"), " +
+        "so Reddit opens in Chrome instead. Your account is fine."
 
 /** Reddit's HTML pages, as they come back in place of data. */
 object RedditPages {

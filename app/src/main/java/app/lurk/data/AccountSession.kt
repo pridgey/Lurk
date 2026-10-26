@@ -60,7 +60,7 @@ class AccountSession(
 
     /** The back stack; the last entry is on screen. Never empty: the UI reads it on first draw. */
     val stack = mutableStateListOf<Screen>(
-        (service.signIn as? SignIn.Web)?.takeIf { signInFirst }?.let { WebScreen(it.url) } ?: feed(null),
+        (service.signIn as? SignIn.Web)?.takeIf { signInFirst && !inChrome }?.let { WebScreen(it.url) } ?: feed(null),
     )
     val current: Screen get() = stack.last()
 
@@ -119,9 +119,22 @@ class AccountSession(
 
     val account: Account? get() = store.find(accountId)
 
+    /** Reddit is blocking Lurk's browser, so this account's Reddit opens in Chrome. See [RedditAccess]. */
+    val inChrome: Boolean get() = service.kind == ServiceKind.Reddit && RedditAccess.inChrome
+
     fun start() {
         shareLemmyLogin()
-        if (syncOnStart) requestSync()
+        if (syncOnStart && !inChrome) requestSync()
+    }
+
+    /** Opens a Reddit page in a Chrome tab (Chrome mode). */
+    fun openInChrome(url: String) = onExternal(Uri.parse(url))
+
+    /** Chrome mode: checks whether Lurk's own browser gets through again. */
+    fun retryLurkBrowser() {
+        RedditAccess.retry()
+        reset(feed(null))
+        requestSync()
     }
 
     /** Lemmy's web pages read the login token from a "jwt" cookie, so web screens are signed in too. */
@@ -252,6 +265,7 @@ class AccountSession(
 
     /** Starts signing in: the site's sign-in page, or Lurk's form. */
     fun signIn() {
+        if (inChrome) return openInChrome(RedditAccess.Urls.LOGIN) // Chrome's own sign-in
         account?.takeIf { it.expired }?.label?.let { onMessage("Sign in as $it") }
         when (val way = service.signIn) {
             is SignIn.Web -> openWeb(way.url)
@@ -398,7 +412,7 @@ class AccountSession(
             throw e
         } catch (e: Exception) {
             syncProblem = e.message ?: "Sync failed."
-            onMessage("Sync failed: ${e.message}")
+            onMessage(if (inChrome) "Reddit is blocking Lurk's browser, so Reddit opens in Chrome." else "Sync failed: ${e.message}")
         }
     }
 

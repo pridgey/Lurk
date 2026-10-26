@@ -102,6 +102,7 @@ import app.lurk.data.FeedScreen
 import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
 import app.lurk.data.ServiceKind
+import app.lurk.data.RedditAccess
 import app.lurk.data.ThreadScreen
 import app.lurk.data.UpdateState
 import app.lurk.data.Updater
@@ -215,6 +216,14 @@ private fun AccountContent(
     val scope = rememberCoroutineScope()
     val onMessage: (String) -> Unit = { message -> scope.launch { snackbar.showSnackbar(message) } }
 
+    // Reddit blocking Lurk's browser: Reddit pages open in Chrome tabs instead.
+    val inChrome = session.inChrome
+    val goHome: () -> Unit = { if (inChrome) session.openInChrome(RedditAccess.Urls.HOME) else session.reset(session.feed(null)) }
+    val goCommunity: (String) -> Unit = { name ->
+        if (inChrome) session.openInChrome(RedditAccess.Urls.community(name)) else session.reset(session.feed(name))
+    }
+    val goDiscover: () -> Unit = { if (inChrome) session.openInChrome(RedditAccess.Urls.COMMUNITIES) else session.reset(session.discover()) }
+
     val handlers = remember(session) {
         PostHandlers(
             openThread = { post -> session.push(session.thread(post.threadRef, post)) },
@@ -266,7 +275,7 @@ private fun AccountContent(
         is ThreadScreen -> screen.post?.let { post -> post.community?.let(::shortCommunity) } ?: "Comments"
         is DiscoverScreen -> "Discover"
         is WebScreen -> links.locate(browser.url).label
-    }
+    }.let { if (inChrome) "Reddit" else it }
     val titleCommunity = when (screen) {
         is FeedScreen -> screen.community?.let { c ->
             service.fixedFeeds.firstOrNull { it.community == c }?.label?.lowercase() ?: c
@@ -274,7 +283,7 @@ private fun AccountContent(
         is ThreadScreen -> screen.post?.community
         is DiscoverScreen -> null
         is WebScreen -> null
-    }
+    }?.takeIf { !inChrome }
 
     val selectedFeed: String? = when (screen) {
         is FeedScreen -> if (screen.community == null) HOME_KEY else screen.community.lowercase()
@@ -288,7 +297,7 @@ private fun AccountContent(
         is ThreadScreen -> screen.post?.community
         is DiscoverScreen -> null
         is WebScreen -> links.locate(browser.url).community
-    }
+    }?.takeIf { !inChrome }
 
     fun toggleSubscription(community: String) {
         val label = naming.community(community)
@@ -311,8 +320,8 @@ private fun AccountContent(
             hidden = { store.needsPin(it.id) },
             multiProfile = store.multiProfile,
             syncing = session.syncing,
-            syncProblem = session.syncProblem,
-            authNote = session.authNote,
+            syncProblem = session.syncProblem.takeIf { !inChrome },
+            authNote = if (inChrome) "Reddit is blocking Lurk's built-in browser, so Reddit opens in Chrome. Your account is fine." else session.authNote,
             actions = AccountActions(
                 signIn = { session.signIn() },
                 retrySync = { session.requestSync() },
@@ -350,9 +359,9 @@ private fun AccountContent(
             discoverKey = DISCOVER_KEY,
             signedIn = account.username != null,
             syncing = session.syncing,
-            onHome = { session.reset(session.feed(null)) },
-            onSubreddit = { session.reset(session.feed(it)) },
-            onDiscover = { session.reset(session.discover()) },
+            onHome = goHome,
+            onSubreddit = goCommunity,
+            onDiscover = goDiscover,
             onSignIn = { session.signIn() },
             onDismiss = { subredditsOpen = false },
         )
@@ -415,7 +424,7 @@ private fun AccountContent(
                     }
                 },
                 actions = {
-                    if (screen is FeedScreen && session.canSubscribe(screen.community)) {
+                    if (!inChrome && screen is FeedScreen && session.canSubscribe(screen.community)) {
                         val community = screen.community!!
                         val subscribed = session.isSubscribed(community)
                         IconButton(onClick = { toggleSubscription(community) }) {
@@ -427,7 +436,7 @@ private fun AccountContent(
                             )
                         }
                     }
-                    when (screen) {
+                    if (!inChrome) when (screen) {
                         is FeedScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.feedSorts, { it.label }) { screen.changeSort(it) }
                         }
@@ -441,7 +450,7 @@ private fun AccountContent(
                     }
                     AccountButton(
                         current = account,
-                        attention = account.expired || session.syncProblem != null || store.accounts.any { it.expired && !it.locked },
+                        attention = account.expired || (session.syncProblem != null && !inChrome) || store.accounts.any { it.expired && !it.locked },
                         onClick = { accountsOpen = true },
                     )
                     OverflowMenu(
@@ -477,9 +486,9 @@ private fun AccountContent(
                 fixedFeeds = service.fixedFeeds,
                 selected = selectedFeed,
                 syncing = session.syncing,
-                onHome = { session.reset(session.feed(null)) },
-                onSubreddit = { session.reset(session.feed(it)) },
-                onDiscover = { session.reset(session.discover()) },
+                onHome = goHome,
+                onSubreddit = goCommunity,
+                onDiscover = goDiscover,
                 onSignIn = { session.signIn() },
                 onOpenAll = { subredditsOpen = true },
             )
@@ -493,7 +502,13 @@ private fun AccountContent(
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
-            key(screen) {
+            if (inChrome) {
+                RedditChromeView(
+                    subreddits = account.communities,
+                    onOpen = session::openInChrome,
+                    onRetry = { session.retryLurkBrowser() },
+                )
+            } else key(screen) {
                 when (screen) {
                     is FeedScreen -> FeedView(
                         screen, session.actions, handlers,

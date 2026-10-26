@@ -217,4 +217,15 @@ class ScreenshotTest {
         "accounts-problem", dark = true, alice,
         syncProblem = "Reddit is rate limiting. Wait a minute and try again.",
     )
+
+    // Reddit blocking Lurk's browser: the Chrome launcher in place of the feed.
+    @Test fun redditChromeLight() {
+        app.lurk.data.RedditAccess.init(context)
+        app.lurk.data.RedditAccess.blocked()
+        try {
+            shoot("reddit-chrome", dark = false) {}
+        } finally {
+            app.lurk.data.RedditAccess.retry()
+        }
+    }
 }
