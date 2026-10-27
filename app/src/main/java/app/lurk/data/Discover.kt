@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 
@@ -61,13 +62,16 @@ sealed interface Peek {
  * Discover: a shuffled deck of communities to swipe through. Right joins, left skips;
  * either way the community goes on the account's seen list and won't come back
  * (until "Start over"). The deck tops itself up from the site's busiest communities.
+ * Typing in its search box swaps the deck for a list of communities on that topic.
  */
 class DiscoverScreen(
     private val service: Service,
     private val scope: CoroutineScope,
     private val seen: SeenCommunities,
-    /** Communities to leave out: ones the account follows, or NSFW ones it hasn't opted into. */
-    private val leaveOut: (CommunityInfo) -> Boolean,
+    /** Whether the account follows a community, by name. */
+    val isSubscribed: (String) -> Boolean,
+    /** Whether the account has opted into NSFW communities. */
+    private val showNsfw: () -> Boolean,
     private val subscribe: (name: String, subscribed: Boolean) -> Unit,
 ) : Screen {
     /** The deck, top card first. */
@@ -189,7 +193,7 @@ class DiscoverScreen(
                     pages++
                     val fresh = page.communities.filter {
                         dealt.add(it.name.lowercase()) && !it.subscribed && it.name !in seen &&
-                            (it.subscribers ?: MIN_MEMBERS) >= MIN_MEMBERS && !leaveOut(it)
+                            !isSubscribed(it.name) && (it.subscribers ?: MIN_MEMBERS) >= MIN_MEMBERS && allowed(it)
                     }
                     deck.addAll(fresh.shuffled())
                     if (page.after == null) {
@@ -205,6 +209,112 @@ class DiscoverScreen(
                 if (gen == generation) loading = false
             }
             if (gen == generation) peekAhead()
+        }
+    }
+
+    private fun allowed(c: CommunityInfo) = !c.over18 || showNsfw()
+
+    // --- Search ---
+
+    /** What's in the search box. Blank shows the deck. */
+    var query by mutableStateOf("")
+        private set
+    /** The query [results] are for, once its first page is in. */
+    var searched by mutableStateOf<String?>(null)
+        private set
+    val results = mutableStateListOf<CommunityInfo>()
+    var searching by mutableStateOf(false)
+        private set
+    var searchError by mutableStateOf<String?>(null)
+        private set
+    /** No more results for this query. */
+    var searchEnded by mutableStateOf(false)
+        private set
+    private var searchAfter: String? = null
+    private var searchJob: Job? = null
+    private var searchGeneration = 0
+
+    val isSearching: Boolean get() = query.isNotBlank()
+
+    /** Updates the search box; searches once typing pauses. */
+    fun type(text: String) {
+        query = text
+        startSearch(debounce = true)
+    }
+
+    /** Searches now, as when the keyboard's Search is pressed. */
+    fun submitSearch() {
+        if (query.trim() != searched || searchError != null) startSearch(debounce = false)
+    }
+
+    fun clearSearch() {
+        query = ""
+        startSearch(debounce = false)
+    }
+
+    /** Joins (or leaves) a community from the results. */
+    fun toggleJoin(community: CommunityInfo) {
+        subscribe(community.name, !isSubscribed(community.name))
+    }
+
+    /** The next page of results, as the list nears its end. */
+    fun searchMore() {
+        if (searching || searchEnded || searchError != null || searched == null) return
+        fetchResults(searched!!, searchGeneration, delayMs = 0)
+    }
+
+    /** After an error: the whole search again, or just the page that failed. */
+    fun retrySearch() {
+        if (results.isEmpty()) {
+            startSearch(debounce = false)
+        } else {
+            searchError = null
+            searchMore()
+        }
+    }
+
+    private fun startSearch(debounce: Boolean) {
+        val q = query.trim()
+        searchGeneration++
+        searchJob?.cancel()
+        searching = false
+        searchError = null
+        if (q.length < MIN_QUERY) {
+            searched = null
+            results.clear()
+            searchEnded = false
+            return
+        }
+        searchAfter = null
+        searchEnded = false
+        // Keep the old results up while the new ones load, so the list doesn't flash empty.
+        fetchResults(q, searchGeneration, delayMs = if (debounce) TYPING_PAUSE_MS else 0, fresh = true)
+    }
+
+    private fun fetchResults(q: String, gen: Int, delayMs: Long, fresh: Boolean = false) {
+        searching = true
+        searchJob = scope.launch {
+            try {
+                if (delayMs > 0) delay(delayMs)
+                val page = service.searchCommunities(q, if (fresh) null else searchAfter)
+                if (gen != searchGeneration) return@launch
+                if (fresh) results.clear()
+                val have = results.mapTo(HashSet()) { it.name.lowercase() }
+                results.addAll(page.communities.filter { have.add(it.name.lowercase()) && allowed(it) })
+                searched = q
+                searchAfter = page.after
+                searchEnded = page.after == null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (gen == searchGeneration) {
+                    if (fresh) results.clear()
+                    searched = q
+                    searchError = e.message ?: "Couldn't search"
+                }
+            } finally {
+                if (gen == searchGeneration) searching = false
+            }
         }
     }
 
@@ -237,5 +347,8 @@ class DiscoverScreen(
         const val MIN_MEMBERS = 10
         const val PEEK_AHEAD = 3
         const val PEEK_POSTS = 3
+        /** Shorter than this matches nearly everything. */
+        const val MIN_QUERY = 2
+        const val TYPING_PAUSE_MS = 400L
     }
 }

@@ -119,6 +119,9 @@ interface Service {
     /** A page of communities worth a look, for Discover. */
     suspend fun discover(sort: Sort?, cursor: String?): CommunityPage
 
+    /** Communities whose name or title matches [query], biggest first, for Discover's search. */
+    suspend fun searchCommunities(query: String, cursor: String?): CommunityPage
+
     /** The sort Discover uses to show a community's best recent posts. */
     val peekSort: Sort?
 

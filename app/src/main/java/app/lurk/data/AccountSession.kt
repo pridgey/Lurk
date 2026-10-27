@@ -161,7 +161,8 @@ class AccountSession(
     /** The Discover deck. One per session, so leaving and coming back keeps your place. */
     fun discover(): DiscoverScreen = discoverScreen ?: DiscoverScreen(
         service, scope, seenCommunities,
-        leaveOut = { c -> isSubscribed(c.name) || (c.over18 && account?.showNsfw != true) },
+        isSubscribed = ::isSubscribed,
+        showNsfw = { account?.showNsfw == true },
         subscribe = { name, on -> setSubscribed(name, on) },
     ).also { discoverScreen = it }
 

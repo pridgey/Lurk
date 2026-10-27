@@ -1,6 +1,7 @@
 package app.lurk.data
 
 import android.content.Context
+import android.net.Uri
 import android.webkit.WebView
 import app.lurk.web.HttpResult
 import app.lurk.web.RedditEngine
@@ -200,6 +201,14 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
             getObject("/subreddits/$listing.json?raw_json=1&limit=100" + (cursor?.let { "&after=$it" } ?: "")),
         )
     }
+
+    override suspend fun searchCommunities(query: String, cursor: String?): CommunityPage =
+        RedditParse.communities(
+            getObject(
+                "/subreddits/search.json?raw_json=1&limit=50&include_over_18=on&q=" + Uri.encode(query) +
+                    (cursor?.let { "&after=$it" } ?: ""),
+            ),
+        )
 
     override val peekSort = RedditSorts.feed.first { it.key == "top:week" }
 

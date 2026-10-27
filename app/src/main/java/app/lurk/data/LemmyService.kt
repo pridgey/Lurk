@@ -254,6 +254,25 @@ class LemmyService(
         return CommunityPage(communities, if (list.length() < DISCOVER_PAGE) null else (page + 1).toString())
     }
 
+    /** Every community the instance knows whose name or title matches; TopAll ranks by members. */
+    override suspend fun searchCommunities(query: String, cursor: String?): CommunityPage {
+        val page = cursor?.toIntOrNull() ?: 1
+        val root = client.get(
+            "/search",
+            mapOf(
+                "q" to query,
+                "type_" to "Communities",
+                "listing_type" to "All",
+                "sort" to "TopAll",
+                "limit" to SEARCH_PAGE.toString(),
+                "page" to page.toString(),
+            ),
+        )
+        val list = root.optJSONArray("communities") ?: JSONArray()
+        val communities = (0 until list.length()).map { LemmyParse.communityInfo(list.getJSONObject(it)) }
+        return CommunityPage(communities, if (list.length() < SEARCH_PAGE) null else (page + 1).toString())
+    }
+
     override val peekSort = LemmySorts.feed.first { it.key == "TopWeek" }
 
     override suspend fun setSubscribed(community: String, subscribed: Boolean) {
@@ -307,6 +326,7 @@ class LemmyService(
         const val ALL = ":all"
         private const val PAGE_SIZE = 25
         private const val DISCOVER_PAGE = 50
+        private const val SEARCH_PAGE = 30
         private const val MAX_DEPTH = "8"
 
         /** "https://Lemmy.World/c/x" or "lemmy.world" to "lemmy.world". */

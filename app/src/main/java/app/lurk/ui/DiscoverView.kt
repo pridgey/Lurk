@@ -1,5 +1,23 @@
 package app.lurk.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -92,6 +110,8 @@ fun DiscoverView(
     onMessage: (String) -> Unit,
 ) {
     LaunchedEffect(screen) { screen.start() }
+    // Back leaves the search before it leaves Discover.
+    BackHandler(enabled = screen.isSearching) { screen.clearSearch() }
     val naming = LocalNaming.current
     val noun = naming.communityNoun
     val scope = rememberCoroutineScope()
@@ -138,121 +158,270 @@ fun DiscoverView(
         }
 
         Column(Modifier.fillMaxSize()) {
-            Text(
-                when {
-                    screen.joined + screen.skipped > 0 -> "${screen.joined} joined · ${screen.skipped} skipped"
-                    signedIn -> "Swipe right to join, left to skip. Tap a card to look inside."
-                    else -> "Swipe left to skip, tap a card to look inside. Sign in to join."
-                },
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
-            )
-
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .pointerInput(top?.name, signedIn) {
-                        if (top == null) return@pointerInput
-                        val tracker = VelocityTracker()
-                        detectDragGestures(
-                            onDragStart = { tracker.resetTracking() },
-                            onDragEnd = {
-                                val vx = tracker.calculateVelocity().x
-                                val x = state.x.value
-                                when {
-                                    x > threshold || (vx > FLING_VELOCITY && x > 0) -> commit(true)
-                                    x < -threshold || (vx < -FLING_VELOCITY && x < 0) -> commit(false)
-                                    else -> settle()
-                                }
-                            },
-                            onDragCancel = { settle() },
-                        ) { change, drag ->
-                            if (state.leaving) return@detectDragGestures
-                            change.consume()
-                            tracker.addPosition(change.uptimeMillis, change.position)
-                            val nextX = state.x.value + drag.x
-                            val over = abs(nextX) > threshold
-                            if (over && !state.over) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            state.over = over
-                            scope.launch {
-                                state.x.snapTo(state.x.value + drag.x)
-                                state.y.snapTo(state.y.value + drag.y)
-                            }
-                        }
+            SearchField(screen.query, "Search ${noun.plural()} by topic", screen::type, screen::submitSearch, screen::clearSearch)
+            if (screen.isSearching) {
+                SearchResults(screen, signedIn, activeLabel, onOpen, onMessage, Modifier.weight(1f))
+            } else {
+                Text(
+                    when {
+                        screen.joined + screen.skipped > 0 -> "${screen.joined} joined · ${screen.skipped} skipped"
+                        signedIn -> "Swipe right to join, left to skip. Tap a card to look inside."
+                        else -> "Swipe left to skip, tap a card to look inside. Sign in to join."
                     },
-                contentAlignment = Alignment.Center,
-            ) {
-                val error = screen.error
-                when {
-                    top != null -> {
-                        val progress = (abs(state.x.value) / threshold).coerceIn(0f, 1f)
-                        // Back to front, so the top card draws last.
-                        val shown = screen.deck.take(3)
-                        for (i in shown.indices.reversed()) {
-                            val community = shown[i]
-                            key(community.name) {
-                                val depth = if (i == 0) 0f else i - progress
-                                CommunityCard(
-                                    info = community,
-                                    peek = screen.peeks[community.name],
-                                    activeLabel = activeLabel,
-                                    joinStamp = if (i == 0) (state.x.value / threshold).coerceIn(0f, 1f) else 0f,
-                                    skipStamp = if (i == 0) (-state.x.value / threshold).coerceIn(0f, 1f) else 0f,
-                                    onClick = { onOpen(community.name) },
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(bottom = 20.dp)
-                                        .graphicsLayer {
-                                            if (i == 0) {
-                                                translationX = state.x.value
-                                                translationY = state.y.value
-                                                rotationZ = state.x.value / widthPx * 14f
-                                            } else {
-                                                val scale = 1f - 0.05f * depth
-                                                scaleX = scale
-                                                scaleY = scale
-                                                translationY = 12.dp.toPx() * depth * 2
-                                                alpha = if (i == 2) progress.coerceAtLeast(0.6f) else 1f
-                                            }
-                                        },
-                                )
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp),
+                )
+
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .pointerInput(top?.name, signedIn) {
+                            if (top == null) return@pointerInput
+                            val tracker = VelocityTracker()
+                            detectDragGestures(
+                                onDragStart = { tracker.resetTracking() },
+                                onDragEnd = {
+                                    val vx = tracker.calculateVelocity().x
+                                    val x = state.x.value
+                                    when {
+                                        x > threshold || (vx > FLING_VELOCITY && x > 0) -> commit(true)
+                                        x < -threshold || (vx < -FLING_VELOCITY && x < 0) -> commit(false)
+                                        else -> settle()
+                                    }
+                                },
+                                onDragCancel = { settle() },
+                            ) { change, drag ->
+                                if (state.leaving) return@detectDragGestures
+                                change.consume()
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                val nextX = state.x.value + drag.x
+                                val over = abs(nextX) > threshold
+                                if (over && !state.over) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                state.over = over
+                                scope.launch {
+                                    state.x.snapTo(state.x.value + drag.x)
+                                    state.y.snapTo(state.y.value + drag.y)
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val error = screen.error
+                    when {
+                        top != null -> {
+                            val progress = (abs(state.x.value) / threshold).coerceIn(0f, 1f)
+                            // Back to front, so the top card draws last.
+                            val shown = screen.deck.take(3)
+                            for (i in shown.indices.reversed()) {
+                                val community = shown[i]
+                                key(community.name) {
+                                    val depth = if (i == 0) 0f else i - progress
+                                    CommunityCard(
+                                        info = community,
+                                        peek = screen.peeks[community.name],
+                                        activeLabel = activeLabel,
+                                        joinStamp = if (i == 0) (state.x.value / threshold).coerceIn(0f, 1f) else 0f,
+                                        skipStamp = if (i == 0) (-state.x.value / threshold).coerceIn(0f, 1f) else 0f,
+                                        onClick = { onOpen(community.name) },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(bottom = 20.dp)
+                                            .graphicsLayer {
+                                                if (i == 0) {
+                                                    translationX = state.x.value
+                                                    translationY = state.y.value
+                                                    rotationZ = state.x.value / widthPx * 14f
+                                                } else {
+                                                    val scale = 1f - 0.05f * depth
+                                                    scaleX = scale
+                                                    scaleY = scale
+                                                    translationY = 12.dp.toPx() * depth * 2
+                                                    alpha = if (i == 2) progress.coerceAtLeast(0.6f) else 1f
+                                                }
+                                            },
+                                    )
+                                }
                             }
                         }
-                    }
-                    error != null -> Notice(error, "Try again", { screen.refresh() })
-                    screen.loading || !screen.started -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Text(
-                            "Shuffling the deck…",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 16.dp),
+                        error != null -> Notice(error, "Try again", { screen.refresh() })
+                        screen.loading || !screen.started -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Text(
+                                "Shuffling the deck…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 16.dp),
+                            )
+                        }
+                        screen.exhausted -> Notice(
+                            "That's every ${noun} we could find. Start over to see the ones you skipped again.",
+                            "Start over",
+                            { screen.startOver() },
                         )
+                        else -> Notice("Nothing new on this stretch.", "Keep looking", { screen.dealMore() })
                     }
-                    screen.exhausted -> Notice(
-                        "That's every ${noun} we could find. Start over to see the ones you skipped again.",
-                        "Start over",
-                        { screen.startOver() },
-                    )
-                    else -> Notice("Nothing new on this stretch.", "Keep looking", { screen.dealMore() })
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 18.dp),
+                ) {
+                    RoundButton(LurkIcons.Undo, "Undo", 52.dp, enabled = screen.last != null) { undo() }
+                    RoundButton(Icons.Default.Close, "Skip", 68.dp, enabled = top != null, tint = SkipColor) { commit(false) }
+                    RoundButton(LurkIcons.Eye, "Look inside", 52.dp, enabled = top != null) { top?.let { onOpen(it.name) } }
+                    if (signedIn) {
+                        RoundButton(Icons.Default.Add, "Join", 68.dp, enabled = top != null, filled = true) { commit(true) }
+                    }
                 }
             }
+        }
+    }
+}
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 18.dp),
+@Composable
+private fun SearchField(
+    query: String,
+    placeholder: String,
+    onChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val keyboard = LocalSoftwareKeyboardController.current
+    OutlinedTextField(
+        value = query,
+        onValueChange = onChange,
+        placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { Icon(Icons.Default.Search, null) },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = onClear) { Icon(Icons.Default.Clear, "Clear search") }
+            }
+        },
+        singleLine = true,
+        shape = CircleShape,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); onSubmit() }),
+        colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+    )
+}
+
+/** Communities matching the search, biggest first; loads more as you scroll. */
+@Composable
+private fun SearchResults(
+    screen: DiscoverScreen,
+    signedIn: Boolean,
+    activeLabel: String,
+    onOpen: (String) -> Unit,
+    onMessage: (String) -> Unit,
+    modifier: Modifier,
+) {
+    val noun = LocalNaming.current.communityNoun
+    val list = rememberLazyListState()
+    // A new query starts back at the top.
+    LaunchedEffect(screen.searched) { list.scrollToItem(0) }
+    val error = screen.searchError
+    Box(modifier.fillMaxWidth()) {
+        when {
+            screen.searched == null && screen.query.trim().length < 2 ->
+                Notice("Type a topic, like \"gardening\" or \"retro games\".")
+            screen.searched == null || (screen.results.isEmpty() && screen.searching) ->
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            screen.results.isEmpty() && error != null -> Notice(error, "Try again", screen::retrySearch)
+            screen.results.isEmpty() -> Notice("No ${noun.plural()} match \"${screen.searched}\".")
+            else -> LazyColumn(
+                state = list,
+                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
+                modifier = Modifier.fillMaxSize().navigationBarsPadding(),
             ) {
-                RoundButton(LurkIcons.Undo, "Undo", 52.dp, enabled = screen.last != null) { undo() }
-                RoundButton(Icons.Default.Close, "Skip", 68.dp, enabled = top != null, tint = SkipColor) { commit(false) }
-                RoundButton(LurkIcons.Eye, "Look inside", 52.dp, enabled = top != null) { top?.let { onOpen(it.name) } }
-                if (signedIn) {
-                    RoundButton(Icons.Default.Add, "Join", 68.dp, enabled = top != null, filled = true) { commit(true) }
+                items(screen.results, key = { "r:" + it.name.lowercase() }) { info ->
+                    ResultRow(
+                        info = info,
+                        activeLabel = activeLabel,
+                        joined = info.subscribed || screen.isSubscribed(info.name),
+                        signedIn = signedIn,
+                        onOpen = { onOpen(info.name) },
+                        onJoin = {
+                            if (signedIn) screen.toggleJoin(info) else onMessage("Sign in to join ${noun.plural()}")
+                        },
+                    )
                 }
+                item(key = "end") {
+                    when {
+                        error != null -> Notice(error, "Try again", screen::retrySearch, Modifier.fillMaxWidth())
+                        !screen.searchEnded -> {
+                            LaunchedEffect(screen.results.size) { screen.searchMore() }
+                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(Modifier.size(28.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // A thin bar while a new query replaces the results on screen.
+        if (screen.searching && screen.results.isNotEmpty()) {
+            LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter).padding(horizontal = 32.dp))
+        }
+    }
+}
+
+@Composable
+private fun ResultRow(
+    info: CommunityInfo,
+    activeLabel: String,
+    joined: Boolean,
+    signedIn: Boolean,
+    onOpen: () -> Unit,
+    onJoin: () -> Unit,
+) {
+    val naming = LocalNaming.current
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = "Open ${naming.community(info.name)}", onClick = onOpen)
+            .padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+    ) {
+        CommunityIcon(info, 52.dp)
+        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    naming.community(info.name),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (info.over18) {
+                    Spacer(Modifier.width(6.dp))
+                    Tag("NSFW", SkipColor)
+                }
+            }
+            val stats = buildList {
+                info.subscribers?.let { add("${compact(it)} members") }
+                info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
+            }
+            if (stats.isNotEmpty()) {
+                Text(stats.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            }
+            val blurb = info.description.ifBlank { info.title.orEmpty() }
+            if (blurb.isNotBlank()) {
+                Text(blurb, style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (signedIn) {
+            if (joined) {
+                OutlinedButton(onClick = onJoin, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Joined") }
+            } else {
+                FilledTonalButton(onClick = onJoin, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Join") }
             }
         }
     }
