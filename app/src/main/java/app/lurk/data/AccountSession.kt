@@ -275,13 +275,16 @@ class AccountSession(
     var rssTesting by mutableStateOf(false)
         private set
 
-    /** Engine debug: how many Reddit RSS requests this connection gets. See [RssProbe]. */
-    fun testRss() {
+    /**
+     * Engine debug: how many Reddit RSS requests this connection gets. With [frontPage],
+     * the account's private front-page feed is tested too. See [RssProbe].
+     */
+    fun testRss(frontPage: String?) {
         if (rssTesting) return
         rssTesting = true
         scope.launch {
             try {
-                RssProbe.run(service.log, build)
+                RssProbe.run(service.log, build, frontPage)
             } finally {
                 rssTesting = false
             }

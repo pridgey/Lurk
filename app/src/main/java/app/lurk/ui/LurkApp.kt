@@ -101,6 +101,7 @@ import app.lurk.data.DiscoverScreen
 import app.lurk.data.FeedScreen
 import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
+import app.lurk.data.RssProbe
 import app.lurk.data.ServiceKind
 import app.lurk.data.RedditAccess
 import app.lurk.data.ThreadScreen
@@ -209,6 +210,7 @@ private fun AccountContent(
     var confirmRemovePin by remember { mutableStateOf(false) }
     var addingLemmy by remember { mutableStateOf(false) }
     var addingBluesky by remember { mutableStateOf(false) }
+    var rssSetup by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     val service = session.service
     val links = session.links
@@ -533,7 +535,7 @@ private fun AccountContent(
                 open = debugOpen,
                 syncing = session.syncing,
                 onSync = { session.requestSync() },
-                onTestRss = { session.testRss() }, // public feeds: no Reddit sign-in needed
+                onTestRss = { rssSetup = true }, // public feeds: no Reddit sign-in needed
                 rssTesting = session.rssTesting,
                 onClose = { debugOpen = false },
             )
@@ -664,6 +666,18 @@ private fun AccountContent(
                 }
             },
             onCancel = { addingBluesky = false },
+        )
+    }
+
+    if (rssSetup) {
+        RssTestDialog(
+            saved = RssProbe.savedFrontPage(context),
+            onRun = { frontPage ->
+                rssSetup = false
+                RssProbe.saveFrontPage(context, frontPage)
+                session.testRss(frontPage)
+            },
+            onCancel = { rssSetup = false },
         )
     }
 
