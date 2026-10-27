@@ -25,6 +25,8 @@ object RssProbe {
         "https://www.reddit.com/r/pics/.rss",
     )
     private const val GAP_MS = 10_000L
+    private const val BURST = 6
+    private const val BURST_GAP_MS = 1_000L
 
     /** The saved front-page feed link. It holds a private token, so it stays on this phone. */
     fun savedFrontPage(context: Context): String? =
@@ -63,23 +65,38 @@ object RssProbe {
                 log.note("RSS ${i + 1}: " + fetch(url, build).line)
             }
         } else {
-            log.note("RSS test: front page, its next page, then a public feed, ${GAP_MS / 1000} s apart")
+            log.note("RSS test: front page, its next page, a quick burst, then a public feed")
             val first = fetch("$frontPage&limit=100", build)
-            log.note("RSS 1 (front page, limit=100): ${first.line}")
+            log.note("RSS 1 (front page, limit=100): ${first.line}${span(first.ids)}")
             delay(GAP_MS)
-            val after = first.lastId
+            val after = first.ids?.lastOrNull()
             if (after != null) {
-                log.note("RSS 2 (front page, next page): " + fetch("$frontPage&limit=100&after=$after", build).line)
+                val next = fetch("$frontPage&limit=100&after=$after", build)
+                val repeats = next.ids?.count { it in first.ids.orEmpty() }
+                log.note("RSS 2 (front page, next page): ${next.line}${span(next.ids)}" +
+                    (repeats?.let { ", $it repeated from page 1" } ?: ""))
             } else {
                 log.note("RSS 2 (front page again): " + fetch(frontPage, build).line)
             }
             delay(GAP_MS)
-            log.note("RSS 3 (public): " + fetch(publicFeeds.first(), build).line)
+            // A quick burst, to find whether the front-page feed has a limit of its own.
+            for (i in 1..BURST) {
+                val r = fetch(frontPage, build)
+                log.note("RSS burst $i/$BURST: ${r.line}")
+                if (r.status != 200) break
+                delay(BURST_GAP_MS)
+            }
+            delay(GAP_MS)
+            log.note("RSS public: " + fetch(publicFeeds.first(), build).line)
         }
         log.note("RSS test done")
     }
 
-    private class Result(val line: String, val lastId: String?)
+    private class Result(val line: String, val status: Int?, val ids: List<String>?)
+
+    /** ", t3_first … t3_last" for a page of post IDs. */
+    private fun span(ids: List<String>?): String =
+        if (ids.isNullOrEmpty()) "" else ", ${ids.first()} … ${ids.last()}"
 
     private val entryId = Regex("<entry>.*?<id>(t3_[a-z0-9]+)</id>", RegexOption.DOT_MATCHES_ALL)
 
@@ -104,9 +121,9 @@ object RssProbe {
                 ids?.let { append(", ").append(it.size).append(" posts") }
                 if (headers.isNotEmpty()) append(" | ").append(headers.joinToString(" "))
             }
-            Result(line, ids?.lastOrNull())
+            Result(line, status, ids)
         } catch (e: Exception) {
-            Result("$shown -> failed: ${e.message}", null)
+            Result("$shown -> failed: ${e.message}", null, null)
         } finally {
             conn.disconnect()
         }
