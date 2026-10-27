@@ -2,7 +2,6 @@ package app.lurk.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -75,28 +74,28 @@ fun RssTestDialog(
 }
 
 /**
- * Sets up Home from the account's private front-page RSS feed, for while Reddit blocks
- * Lurk's browser. [saved] is the link in use, if any; Remove goes back to Chrome.
+ * Signs in a Reddit RSS account: its front page's private RSS feed link. [knownUser]: the
+ * account being signed back in, if any.
  */
 @Composable
 fun RssLinkDialog(
-    saved: String?,
+    knownUser: String?,
     suggested: String?,
-    onSave: (String?) -> Unit,
+    onSave: (String) -> Unit,
     onCancel: () -> Unit,
 ) {
-    var text by remember { mutableStateOf(saved ?: suggested.orEmpty()) }
+    var text by remember { mutableStateOf(suggested.orEmpty()) }
     val parsed = RssProbe.parseFrontPage(text)
     val blank = text.isBlank()
 
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text("Front page in Lurk") },
+        title = { Text(if (knownUser == null) "Add a Reddit RSS account" else "Sign in as u/$knownUser") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Lurk can show your Reddit front page from its private RSS feed. In Chrome, open " +
-                        "old.reddit.com/prefs/feeds and copy the RSS link next to \"your frontpage\". " +
+                    "Lurk reads your front page from its private RSS feed, and learns your subreddits from it. " +
+                        "In Chrome, open old.reddit.com/prefs/feeds and copy the RSS link next to \"your frontpage\". " +
                         "RSS has no scores or comments: posts open in Chrome for those.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -121,13 +120,8 @@ fun RssLinkDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(parsed) }, enabled = parsed != null) { Text("Save") }
+            TextButton(onClick = { parsed?.let(onSave) }, enabled = parsed != null) { Text("Sign in") }
         },
-        dismissButton = {
-            Row {
-                if (saved != null) TextButton(onClick = { onSave(null) }) { Text("Remove") }
-                TextButton(onClick = onCancel) { Text("Cancel") }
-            }
-        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
 }

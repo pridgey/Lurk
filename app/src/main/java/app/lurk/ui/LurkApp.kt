@@ -105,6 +105,7 @@ import app.lurk.data.FeedScreen
 import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
 import app.lurk.data.RssProbe
+import app.lurk.data.RedditRssService
 import app.lurk.data.ServiceKind
 import app.lurk.data.RedditAccess
 import app.lurk.data.ThreadScreen
@@ -214,7 +215,7 @@ private fun AccountContent(
     var addingLemmy by remember { mutableStateOf(false) }
     var addingBluesky by remember { mutableStateOf(false) }
     var rssSetup by remember { mutableStateOf(false) }
-    var rssLinkOpen by remember { mutableStateOf(false) }
+    var addingRss by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     val service = session.service
     val links = session.links
@@ -225,13 +226,9 @@ private fun AccountContent(
 
     // Reddit blocking Lurk's browser: Reddit pages open in Chrome tabs instead.
     val inChrome = session.inChrome
-    // ...except Home, when it comes from the front page's RSS feed.
-    val rssShown = screen is FeedScreen && screen.rss != null
-    val goHome: () -> Unit = {
-        if (inChrome && !session.rssHome) session.openInChrome(RedditAccess.Urls.HOME) else session.reset(session.feed(null))
-    }
+    val goHome: () -> Unit = { if (inChrome) session.openInChrome(RedditAccess.Urls.HOME) else session.reset(session.feed(null)) }
 
-    // Back in the app after a while: an RSS Home checks for new posts.
+    // Back in the app after a while: an RSS feed checks for new posts.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, session) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) session.onResume() }
@@ -241,12 +238,13 @@ private fun AccountContent(
     val goCommunity: (String) -> Unit = { name ->
         if (inChrome) session.openInChrome(RedditAccess.Urls.community(name)) else session.reset(session.feed(name))
     }
-    val goDiscover: () -> Unit = { if (inChrome) session.openInChrome(RedditAccess.Urls.COMMUNITIES) else session.reset(session.discover()) }
+    // RSS can't list communities; Reddit's own page can.
+    val goDiscover: () -> Unit = { if (session.webInChrome) session.openInChrome(RedditAccess.Urls.COMMUNITIES) else session.reset(session.discover()) }
 
     val handlers = remember(session) {
         PostHandlers(
             openThread = { post ->
-                if (session.inChrome) session.openWeb(post.shareUrl ?: session.links.thread(post.threadRef))
+                if (session.webInChrome) session.openWeb(post.shareUrl ?: session.links.thread(post.threadRef))
                 else session.push(session.thread(post.threadRef, post))
             },
             openLink = { url -> session.openLink(url) },
@@ -258,7 +256,7 @@ private fun AccountContent(
                 if (session.inChrome) session.openInChrome(RedditAccess.Urls.community(name)) else session.push(session.feed(name))
             },
             openUser = { name -> session.openWeb(session.links.user(name)) },
-            openRef = { ref -> if (session.inChrome) session.openWeb(session.links.thread(ref)) else session.push(session.thread(ref)) },
+            openRef = { ref -> if (session.webInChrome) session.openWeb(session.links.thread(ref)) else session.push(session.thread(ref)) },
             openOnWeb = { post -> session.openWeb(session.links.thread(post.threadRef)) },
             share = { post -> sharePost(context, post, session.links.share(post)) },
             openVideo = { post, startMs -> session.openVideo(post, startMs) },
@@ -299,7 +297,7 @@ private fun AccountContent(
         is ThreadScreen -> screen.post?.let { post -> post.community?.let(::shortCommunity) } ?: "Comments"
         is DiscoverScreen -> "Discover"
         is WebScreen -> links.locate(browser.url).label
-    }.let { if (inChrome && !rssShown) "Reddit" else it }
+    }.let { if (inChrome) "Reddit" else it }
     val titleCommunity = when (screen) {
         is FeedScreen -> screen.community?.let { c ->
             service.fixedFeeds.firstOrNull { it.community == c }?.label?.lowercase() ?: c
@@ -340,7 +338,7 @@ private fun AccountContent(
     if (accountsOpen) {
         AccountSheet(
             current = account,
-            accounts = store.accounts,
+            accounts = store.visibleAccounts,
             hidden = { store.needsPin(it.id) },
             multiProfile = store.multiProfile,
             syncing = session.syncing,
@@ -363,13 +361,16 @@ private fun AccountContent(
                         store.setActive(added.id)
                     }
                 },
+                addRedditRss = { addingRss = true },
                 addLemmy = { addingLemmy = true },
                 addBluesky = { addingBluesky = true },
                 setNsfw = { on -> store.update(account.id) { it.copy(showNsfw = on) } },
                 setPin = { settingPin = true },
                 removePin = { confirmRemovePin = true },
                 signOut = { confirmSignOut = true },
+                setStandardReddit = { on -> store.changeStandardReddit(on) },
             ),
+            standardReddit = store.standardReddit,
             onDismiss = { accountsOpen = false },
         )
     }
@@ -475,7 +476,7 @@ private fun AccountContent(
                     }
                     AccountButton(
                         current = account,
-                        attention = account.expired || (session.syncProblem != null && !inChrome) || store.accounts.any { it.expired && !it.locked },
+                        attention = account.expired || (session.syncProblem != null && !inChrome) || store.visibleAccounts.any { it.expired && !it.locked },
                         onClick = { accountsOpen = true },
                     )
                     OverflowMenu(
@@ -527,25 +528,21 @@ private fun AccountContent(
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
-            if (inChrome && !rssShown) {
+            if (session.isRss && !account.signedIn && screen is FeedScreen) {
+                RssSignInView(onSignIn = { session.signIn() })
+            } else if (inChrome) {
                 RedditChromeView(
                     subreddits = account.communities,
                     onOpen = session::openInChrome,
                     onRetry = { session.retryLurkBrowser() },
-                    onSetUpRss = { rssLinkOpen = true },
+                    onSetUpRss = { addingRss = true },
                 )
             } else key(screen) {
                 when (screen) {
                     is FeedScreen -> FeedView(
                         screen, session.actions, handlers,
                         onViewOnWeb = { session.openWeb(screen.webUrl) },
-                        header = if (screen.rss == null) null else ({
-                            RssHomeHeader(
-                                screen,
-                                onFeedLink = { rssLinkOpen = true },
-                                onRetryBrowser = { session.retryLurkBrowser() },
-                            )
-                        }),
+                        header = if (!session.isRss) null else ({ RssFeedHeader(screen) }),
                     )
                     is ThreadScreen -> ThreadView(screen, session.actions, handlers, onMessage)
                     is DiscoverScreen -> DiscoverView(
@@ -625,19 +622,41 @@ private fun AccountContent(
         }
     }
 
-    if (rssLinkOpen) {
+    if (addingRss) {
         RssLinkDialog(
-            saved = session.rss?.link,
+            knownUser = null,
             suggested = RssProbe.savedFrontPage(context),
             onSave = { link ->
-                rssLinkOpen = false
-                session.setRssLink(link)
+                addingRss = false
+                val user = RedditRssService.userOf(link)
+                val existing = store.accounts.firstOrNull {
+                    it.kind == ServiceKind.RedditRss && (it.username ?: it.knownAs).equals(user, ignoreCase = true)
+                }
+                if (existing?.id == account.id) {
+                    session.onRssLinked(link)
+                } else if (existing != null) {
+                    store.update(existing.id) { it.copy(username = user, knownAs = user, token = link) }
+                    store.setActive(existing.id)
+                    onMessage("${existing.label} is already added, switched to it")
+                } else if (!account.signedIn && !account.expired && account.kind == ServiceKind.RedditRss) {
+                    session.onRssLinked(link) // fill this empty slot
+                } else {
+                    val added = store.add(ServiceKind.RedditRss) { it.copy(username = user, knownAs = user, token = link) }
+                    store.setActive(added.id)
+                }
             },
-            onCancel = { rssLinkOpen = false },
+            onCancel = { addingRss = false },
         )
     }
 
-    if (session.signingIn && service.kind == ServiceKind.Bluesky) {
+    if (session.signingIn && service.kind == ServiceKind.RedditRss) {
+        RssLinkDialog(
+            knownUser = account.knownAs,
+            suggested = account.token ?: RssProbe.savedFrontPage(context),
+            onSave = { link -> session.onRssLinked(link) },
+            onCancel = { session.signingIn = false },
+        )
+    } else if (session.signingIn && service.kind == ServiceKind.Bluesky) {
         BlueskyLoginDialog(
             knownHandle = account.knownAs,
             onSignedIn = { login -> session.onBlueskySignedIn(login) },

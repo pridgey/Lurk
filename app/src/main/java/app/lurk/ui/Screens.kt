@@ -1,5 +1,6 @@
 package app.lurk.ui
 
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -113,6 +114,17 @@ fun FeedView(
                     }
                 }
                 if (screen.loading && screen.error == null) {
+                    screen.loadingNote?.let { note ->
+                        item(key = "waiting") {
+                            Text(
+                                note,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+                            )
+                        }
+                    }
                     item { Spacer(Modifier.height(6.dp)) }
                     items(3) { SkeletonCard() }
                 }

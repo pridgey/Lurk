@@ -132,8 +132,11 @@ data class More(
     override val key: String get() = "more:$name:$parentName:${children.firstOrNull()}"
 }
 
-/** [after]: the cursor for the next page, or null at the end. */
-class FeedPage(val posts: List<Post>, val after: String?)
+/**
+ * [after]: the cursor for the next page, or null at the end. Services that keep pages
+ * (RSS) say when it was fetched ([fetchedAt], ms) and anything to show about that ([notice]).
+ */
+class FeedPage(val posts: List<Post>, val after: String?, val fetchedAt: Long? = null, val notice: String? = null)
 
 class ThreadData(val post: Post, val items: List<ThreadItem>, val isSingleThread: Boolean)
 

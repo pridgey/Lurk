@@ -1,55 +1,62 @@
 package app.lurk.ui
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.lurk.data.FeedScreen
 
-/**
- * Over an RSS Home: where the posts come from, how fresh they are, and the way to change
- * the feed link or try Lurk's own browser again.
- */
+/** An RSS account without its feed link yet. */
 @Composable
-fun RssHomeHeader(screen: FeedScreen, onFeedLink: () -> Unit, onRetryBrowser: () -> Unit) {
+fun RssSignInView(onSignIn: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
     ) {
-        Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 4.dp)) {
-            val fetched = screen.fetchedAt
+        Column(Modifier.padding(20.dp)) {
+            Text("Reddit, through RSS", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(8.dp))
             Text(
-                "From your front page's RSS feed" +
-                    (fetched?.let { " · updated " + ago(it / 1000).let { a -> if (a == "now") "just now" else "$a ago" } } ?: ""),
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Text(
-                "Reddit is blocking Lurk's browser. Comments, votes and subreddits open in Chrome.",
-                style = MaterialTheme.typography.bodySmall,
+                "Lurk reads your front page from its private RSS feed, and fills the bottom bar with the " +
+                    "subreddits it sees there. Each subreddit loads from its own feed. RSS has posts only: " +
+                    "comments and votes open in Chrome.",
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp, end = 8.dp),
             )
-            screen.notice?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 6.dp, end = 8.dp),
-                )
+            Button(onClick = onSignIn, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+                Text("Add your feed link")
             }
-            Row {
-                TextButton(onClick = onFeedLink) { Text("Feed link") }
-                TextButton(onClick = onRetryBrowser) { Text("Try Lurk's browser") }
-            }
+        }
+    }
+}
+
+/** Over an RSS account's feed: how fresh its posts are, and anything off about that. */
+@Composable
+fun RssFeedHeader(screen: FeedScreen) {
+    val fetched = screen.fetchedAt ?: return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
+        Text(
+            "Updated " + ago(fetched / 1000).let { if (it == "now") "just now" else "$it ago" } + " · comments open in Chrome",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        screen.notice?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
     }
 }

@@ -35,7 +35,10 @@ data class Account(
     val showNsfw: Boolean = false,
     /** Lemmy: the instance's host, e.g. "lemmy.world". */
     val instance: String? = null,
-    /** Lemmy: the login token (JWT) the instance issued. Bluesky: the access token. Null when signed out. */
+    /**
+     * Lemmy: the login token (JWT) the instance issued. Bluesky: the access token. Reddit RSS:
+     * the front page's private feed link. Null when signed out.
+     */
     val token: String? = null,
     /** Bluesky: the token that renews [token]. Each renewal replaces both. */
     val refreshToken: String? = null,
@@ -53,13 +56,14 @@ data class Account(
             ServiceKind.Reddit -> "Reddit"
             ServiceKind.Lemmy -> instance ?: "Lemmy"
             ServiceKind.Bluesky -> "Bluesky"
+            ServiceKind.RedditRss -> "Reddit (RSS)"
         }
 
     /** How the account is named in menus: "u/name", "name@lemmy.world". Kept while [expired]. */
     val label: String?
         get() = (username ?: knownAs)?.let { name ->
             when (kind) {
-                ServiceKind.Reddit -> "u/$name"
+                ServiceKind.Reddit, ServiceKind.RedditRss -> "u/$name"
                 ServiceKind.Lemmy -> "$name@$instance"
                 ServiceKind.Bluesky -> "@$name"
             }
@@ -86,12 +90,64 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
     /** An account just added via "Add account", which should open on the sign-in page. */
     private var pendingLogin: String? = null
 
+    /**
+     * Whether standard Reddit accounts (signed in on Reddit's site) are offered. Off by
+     * default while Reddit blocks Lurk's browser: Reddit is read through RSS accounts.
+     * Off hides them; it doesn't remove them.
+     */
+    var standardReddit by mutableStateOf(prefs.getBoolean(KEY_STANDARD_REDDIT, false))
+        private set
+
+    /** The setting only applies with profiles; one-account phones keep what they have. */
+    private val hidesStandardReddit: Boolean get() = multiProfile && !standardReddit
+
+    fun isVisible(a: Account) = !(hidesStandardReddit && a.kind == ServiceKind.Reddit)
+
+    /** The accounts the menus offer. */
+    val visibleAccounts: List<Account> get() = accounts.filter(::isVisible)
+
     init {
         if (accounts.isEmpty()) accounts = listOf(newAccount())
         activeId = prefs.getString(KEY_ACTIVE, null)
             ?.takeIf { id -> accounts.any { it.id == id } }
             ?: accounts.first().id
+        moveRssLinks(context)
+        showVisible()
         save()
+    }
+
+    fun changeStandardReddit(on: Boolean) {
+        standardReddit = on
+        prefs.edit().putBoolean(KEY_STANDARD_REDDIT, on).apply()
+        showVisible()
+        save()
+    }
+
+    /** Keeps a visible account active, adding an RSS account when there's none to show. */
+    private fun showVisible() {
+        if (find(activeId)?.let(::isVisible) == true) return
+        val next = visibleAccounts.firstOrNull() ?: newAccount().also { accounts = accounts + it }
+        if (activeId != next.id) previousId = null
+        activeId = next.id
+    }
+
+    /**
+     * A front page feed link set up on a standard Reddit account (build 35) becomes an RSS
+     * account of its own.
+     */
+    private fun moveRssLinks(context: Context) {
+        if (!multiProfile) return
+        val rss = context.getSharedPreferences("reddit_rss", Context.MODE_PRIVATE)
+        accounts.filter { it.kind == ServiceKind.Reddit }.forEach { a ->
+            val link = rss.getString("link:${a.id}", null) ?: return@forEach
+            rss.edit().remove("link:${a.id}").apply()
+            if (accounts.any { it.kind == ServiceKind.RedditRss && it.token == link }) return@forEach
+            val user = RedditRssService.userOf(link)
+            accounts = accounts + newAccount().copy(
+                kind = ServiceKind.RedditRss, username = user, knownAs = user, token = link, showNsfw = a.showNsfw,
+            )
+            if (activeId == a.id && hidesStandardReddit) activeId = accounts.last().id
+        }
     }
 
     fun find(id: String): Account? = accounts.firstOrNull { it.id == id }
@@ -168,8 +224,8 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
 
     /** An account to show instead of a locked one: the one before it, or any without a PIN. */
     fun elsewhere(): String? =
-        previousId?.takeIf { it != activeId && find(it)?.locked == false }
-            ?: accounts.firstOrNull { !it.locked && it.id != activeId }?.id
+        previousId?.takeIf { it != activeId && find(it)?.let { a -> !a.locked && isVisible(a) } == true }
+            ?: visibleAccounts.firstOrNull { !it.locked && it.id != activeId }?.id
 
     /** Removes an account and its sign-in without opening it (for a forgotten PIN). */
     fun forget(id: String) {
@@ -188,12 +244,14 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
     fun remove(id: String) {
         accounts = accounts.filterNot { it.id == id }
         if (accounts.isEmpty()) accounts = listOf(newAccount())
-        if (find(activeId) == null) activeId = accounts.first().id
+        if (find(activeId) == null) activeId = visibleAccounts.firstOrNull()?.id ?: accounts.first().id
+        showVisible()
         save()
     }
 
     private fun newAccount() = Account(
         id = if (multiProfile) "acct_" + UUID.randomUUID().toString().take(8) else "default",
+        kind = if (hidesStandardReddit) ServiceKind.RedditRss else ServiceKind.Reddit,
     )
 
     private fun read(): List<Account> {
@@ -246,5 +304,6 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
     private companion object {
         const val KEY_ACCOUNTS = "accounts"
         const val KEY_ACTIVE = "active"
+        const val KEY_STANDARD_REDDIT = "standardReddit"
     }
 }

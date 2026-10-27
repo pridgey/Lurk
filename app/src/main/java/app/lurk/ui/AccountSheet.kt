@@ -61,12 +61,15 @@ class AccountActions(
     /** Switches to a signed-out account and opens its sign-in. */
     val signInTo: (Account) -> Unit,
     val addReddit: () -> Unit,
+    val addRedditRss: () -> Unit,
     val addLemmy: () -> Unit,
     val addBluesky: () -> Unit,
     val setNsfw: (Boolean) -> Unit,
     val setPin: () -> Unit,
     val removePin: () -> Unit,
     val signOut: () -> Unit,
+    /** Offer standard Reddit accounts (signed in on Reddit's site), or hide them. */
+    val setStandardReddit: (Boolean) -> Unit = {},
 )
 
 /**
@@ -85,6 +88,8 @@ fun AccountSheet(
     syncProblem: String?,
     authNote: String?,
     actions: AccountActions,
+    /** Standard Reddit accounts are offered. */
+    standardReddit: Boolean,
     onDismiss: () -> Unit,
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -98,7 +103,7 @@ fun AccountSheet(
         sheetState = state,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        AccountSheetContent(current, accounts, hidden, multiProfile, syncing, syncProblem, authNote, actions, ::pick)
+        AccountSheetContent(current, accounts, hidden, multiProfile, syncing, syncProblem, authNote, actions, ::pick, standardReddit)
     }
 }
 
@@ -114,6 +119,7 @@ internal fun AccountSheetContent(
     authNote: String?,
     actions: AccountActions,
     pick: (() -> Unit) -> Unit,
+    standardReddit: Boolean = true,
 ) {
     val others = accounts.filter { it.id != current.id }
     Column(
@@ -160,7 +166,8 @@ internal fun AccountSheetContent(
 
         if (multiProfile) {
             SectionHeader("Add account")
-            ActionRow(Icons.Default.Add, "Reddit", onClick = { pick(actions.addReddit) })
+            ActionRow(Icons.Default.Add, "Reddit (RSS)", onClick = { pick(actions.addRedditRss) })
+            if (standardReddit) ActionRow(Icons.Default.Add, "Reddit", onClick = { pick(actions.addReddit) })
             ActionRow(Icons.Default.Add, "Lemmy", onClick = { pick(actions.addLemmy) })
             ActionRow(Icons.Default.Add, "Bluesky", onClick = { pick(actions.addBluesky) })
         }
@@ -177,6 +184,17 @@ internal fun AccountSheetContent(
                 },
                 color = MaterialTheme.colorScheme.error,
                 onClick = { pick(actions.signOut) },
+            )
+        }
+        if (multiProfile) {
+            HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            SwitchRow(
+                icon = Icons.Default.AccountCircle,
+                title = "Standard Reddit accounts",
+                subtitle = if (standardReddit) "Signed in on Reddit's site. Reddit blocks Lurk's browser right now."
+                    else "Signed in on Reddit's site. Hidden while off; Reddit blocks Lurk's browser right now.",
+                checked = standardReddit,
+                onChange = { on -> pick { actions.setStandardReddit(on) } },
             )
         }
         if (!multiProfile) {

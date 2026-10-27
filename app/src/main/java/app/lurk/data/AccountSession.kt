@@ -58,15 +58,15 @@ class AccountSession(
                 onTokens = { access, refresh -> store.update(accountId) { it.copy(token = access, refreshToken = refresh) } },
                 onTokenRejected = { onLemmyTokenRejected() },
             )
+            ServiceKind.RedditRss -> RedditRssService(
+                context, accountId, build,
+                link = a?.token,
+                onLearned = { names -> store.update(accountId) { it.copy(communities = names) } },
+                onLinkRejected = { onLemmyTokenRejected() },
+            )
         }
     }
     val links get() = service.links
-
-    /** Reddit's RSS front page, for Home while Reddit blocks Lurk's browser. Null for other sites. */
-    val rss: RedditRss? = if (service.kind == ServiceKind.Reddit) RedditRss(context, accountId, build, service.log) else null
-
-    /** Home comes from [rss]: Chrome mode, with a feed link given. */
-    val rssHome: Boolean get() = inChrome && rss?.link != null
     val actions = Actions(service, scope, signedIn = { account?.username != null }, onMessage = onMessage)
     val browser = BrowserController(
         context, profile, scripts, service.links, onExternal,
@@ -165,24 +165,34 @@ class AccountSession(
     // --- Navigation ---
 
     fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen =
-        FeedScreen(community, sort, service, scope, rss = rss.takeIf { community == null && rssHome }).also { it.loadMore() }
+        FeedScreen(community, sort, service, scope).also { it.loadMore() }
 
-    /** Sets (or with null, removes) the RSS front page link, and opens Home on it. */
-    fun setRssLink(url: String?) {
-        rss?.changeLink(url)
-        reset(feed(null))
-    }
+    /** An RSS account: posts only, with comments, users and other pages on Reddit in Chrome. */
+    val isRss: Boolean get() = service.kind == ServiceKind.RedditRss
+
+    /** Posts, users and other web pages open in Chrome: Reddit blocks Lurk's browser, or this is an RSS account. */
+    val webInChrome: Boolean get() = inChrome || isRss
 
     /**
-     * Back in the app: an RSS Home that's been away a while checks for new posts, but only
+     * Back in the app: an RSS feed that's been away a while checks for new posts, but only
      * from the top of the list, so it never yanks you from where you were reading.
      */
     fun onResume() {
-        val home = current as? FeedScreen ?: return
-        val rss = home.rss ?: return
-        if (stack.size == 1 && rss.isStale && !home.loading && home.listState.firstVisibleItemIndex == 0) {
-            home.refresh(pulled = false)
+        val feed = current as? FeedScreen ?: return
+        val rss = service as? RedditRssService ?: return
+        if (rss.isStale(feed.community) && !feed.loading && feed.listState.firstVisibleItemIndex == 0) {
+            feed.refresh(pulled = false)
         }
+    }
+
+    /** An RSS account was given its front page feed link: that's its sign-in. */
+    fun onRssLinked(link: String) {
+        signingIn = false
+        val user = RedditRssService.userOf(link)
+        (service as? RedditRssService)?.link = link
+        store.update(accountId) { it.copy(username = user, knownAs = user, token = link) }
+        reset(feed(null))
+        requestSync()
     }
 
     fun thread(ref: String, preview: Post? = null): ThreadScreen =
@@ -200,7 +210,7 @@ class AccountSession(
 
     /** Whether the signed-in account can subscribe to [community]'s feed (not Home, All, ...). */
     fun canSubscribe(community: String?): Boolean =
-        community != null && account?.username != null && !service.isMixed(community)
+        community != null && account?.username != null && !service.isMixed(community) && !isRss
 
     fun isSubscribed(community: String): Boolean =
         account?.communities?.any { it.equals(community, ignoreCase = true) } == true
@@ -235,18 +245,24 @@ class AccountSession(
 
     fun pop(): Boolean {
         if (stack.size <= 1) return false
-        stack.removeAt(stack.lastIndex)
+        close(stack.removeAt(stack.lastIndex))
         return true
     }
 
     /** Starts over at [screen], as when tapping a community in the bottom bar. */
     fun reset(screen: Screen) {
+        stack.forEach(::close)
         stack.clear()
         stack += screen
     }
 
+    /** A feed that's gone stops loading, so it doesn't spend a rate-limited request nobody will see. */
+    private fun close(screen: Screen) {
+        (screen as? FeedScreen)?.cancel()
+    }
+
     fun openWeb(url: String) {
-        if (inChrome) openInChrome(chromeUrl(url)) else push(WebScreen(url))
+        if (webInChrome) openInChrome(chromeUrl(url)) else push(WebScreen(url))
     }
 
     /** Chrome mode opens www.reddit.com, which Chrome's own sign-in covers. */
@@ -263,7 +279,9 @@ class AccountSession(
     fun openLink(raw: String) {
         val uri = links.resolve(raw)
         links.route(uri)?.let {
-            if (inChrome) return openInChrome(chromeUrl(uri.toString()))
+            // RSS accounts open subreddits here, from their feeds; everything else is Chrome's.
+            if (isRss && it is Route.Feed && it.community != null) return push(feed(it.community))
+            if (webInChrome) return openInChrome(chromeUrl(uri.toString()))
             push(screenFor(it))
             return
         }
@@ -378,7 +396,7 @@ class AccountSession(
         val name = account?.label
         (service as? LemmyService)?.let { lemmy -> scope.launch { runCatching { lemmy.logOut() } } }
         (service as? BlueskyService)?.let { bluesky -> scope.launch { runCatching { bluesky.logOut() } } }
-        rss?.changeLink(null) // the link reads this account's front page
+        (service as? RedditRssService)?.logOut() // the link reads this account's front page
         if (store.multiProfile) {
             store.remove(accountId) // switches the UI away, which destroys this session
             WebProfiles.wipe(profile)

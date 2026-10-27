@@ -11,7 +11,11 @@ import java.util.Date
 import java.util.Locale
 
 /** The sites Lurk can read. Each account belongs to one. */
-enum class ServiceKind { Reddit, Lemmy, Bluesky }
+enum class ServiceKind {
+    Reddit, Lemmy, Bluesky,
+    /** Reddit read through its RSS feeds: the front page's private feed, and each subreddit's. */
+    RedditRss,
+}
 
 /** A sort order as a site names it: [key] is sent to the site, [label] is shown. */
 data class Sort(val key: String, val label: String)
@@ -99,6 +103,13 @@ interface Service {
 
     /** A page of posts: Home ([community] = null), a fixed feed, or a community. */
     suspend fun feed(community: String?, sort: Sort?, cursor: String?): FeedPage
+
+    /** [refresh]: the user asked for fresh posts (a pull), where the service keeps pages. */
+    suspend fun feed(community: String?, sort: Sort?, cursor: String?, refresh: Boolean): FeedPage =
+        feed(community, sort, cursor)
+
+    /** What a feed that's taking a while is waiting on, e.g. a rate limit. Null otherwise. */
+    val loadingNote: String? get() = null
 
     /** Whether [community]'s feed mixes communities, so each post shows its own. */
     fun isMixed(community: String?): Boolean

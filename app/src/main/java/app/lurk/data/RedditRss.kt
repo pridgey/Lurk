@@ -20,129 +20,229 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 
-/** A page of the RSS front page: the posts, when they were fetched, and anything to tell the reader. */
-class RssPage(val page: FeedPage, val fetchedAt: Long, val notice: String?)
+/** Reddit no longer accepts the front page's feed link. */
+class FeedLinkRejected(message: String) : ServiceException(message)
 
 /**
- * The account's Reddit front page from its private RSS feed (reddit.com/prefs/feeds), for
- * while Reddit blocks Lurk's browser. The feed needs no sign-in and, unlike public RSS
- * feeds (one request a minute), showed no rate limit in testing. RSS has posts only: no
- * scores, comment counts or comments.
+ * Reddit's RSS feeds for one account: the front page's private feed (from
+ * reddit.com/prefs/feeds) and subreddit feeds. RSS has posts only: no scores, comment
+ * counts or comments.
  *
- * Paced like an RSS reader: the first page is kept on the phone and shown at once; it's
- * fetched again when it's over [FRESH_MS] old, or on a pull (at most once per [MIN_PULL_MS]).
- * A 429 backs off for as long as Reddit says, doubling each time.
+ * The private feed showed no rate limit in testing. Public feeds get one request a
+ * minute, so subreddit requests wait their turn ([waiting] says so) instead of being
+ * refused. Subreddit requests carry the feed link's credentials too, in case that lifts
+ * the limit; if Reddit refuses them, they go without.
+ *
+ * Paced like an RSS reader: each feed's first page is kept on the phone and shown at
+ * once; it's fetched again when it's over [FRESH_MS] old, or on a pull (at most once per
+ * [MIN_PULL_MS]). When a feed would have to wait for the limit and a saved copy exists,
+ * the saved copy shows instead.
  */
 class RedditRss(context: Context, accountId: String, private val build: Int, private val log: DebugLog) {
 
-    private val prefs = context.getSharedPreferences("reddit_rss", Context.MODE_PRIVATE)
-    private val key = "link:$accountId"
-    private val cacheFile = File(context.cacheDir, "rss-front-$accountId.xml")
+    /** The front page feed link, as [RssProbe.parseFrontPage] gives it. Null: not set up. */
+    var link: String? = null
+        set(value) {
+            // A different link is someone else's front page; setting the first one isn't a change.
+            if (field != null && value != field) clearCache()
+            field = value
+        }
 
-    /** The feed link, as [RssProbe.parseFrontPage] gives it. Null: not set up. Kept on this phone. */
-    var link by mutableStateOf(prefs.getString(key, null))
+    /** What a feed is waiting on right now, with a countdown. */
+    var waiting by mutableStateOf<String?>(null)
         private set
 
-    fun changeLink(url: String?) {
-        if (url == link) return
-        link = url
-        prefs.edit().apply { if (url == null) remove(key) else putString(key, url) }.apply()
-        cacheFile.delete()
-        cached = null
-    }
+    private val cacheDir = File(context.cacheDir, "rss/$accountId")
 
     private class Cached(val xml: String, val fetchedAt: Long)
 
-    private var cached: Cached? = null
-        get() = field ?: runCatching {
-            cacheFile.takeIf { it.exists() }?.let { Cached(it.readText(), it.lastModified()) }
-        }.getOrNull().also { field = it }
+    private val cached = HashMap<String, Cached?>()
 
-    /** Whether the saved first page is old enough to fetch again without being asked. */
-    val isStale: Boolean get() = (cached?.fetchedAt ?: 0L).let { System.currentTimeMillis() - it > FRESH_MS }
+    private fun key(community: String?) =
+        community?.lowercase()?.replace(Regex("[^a-z0-9_+]"), "")?.let { "r_$it" } ?: "front"
 
-    private val mutex = Mutex()
-    private var lastRequestAt = 0L
-    private var backoffUntil = 0L
-    private var backoffMs = 0L
+    private fun saved(key: String): Cached? = cached.getOrPut(key) {
+        runCatching {
+            File(cacheDir, "$key.xml").takeIf { it.exists() }?.let { Cached(it.readText(), it.lastModified()) }
+        }.getOrNull()
+    }
 
-    /**
-     * A page of posts. [cursor] null is the first page; [force] is a pull to refresh,
-     * which still uses the saved page when it's under a minute old.
-     */
-    suspend fun page(cursor: String?, force: Boolean): RssPage = mutex.withLock {
-        val url = link ?: throw ServiceException("Add your front page feed link first")
-        val saved = if (cursor == null) cached else null
-        val age = saved?.let { System.currentTimeMillis() - it.fetchedAt }
-        if (saved != null && age!! < (if (force) MIN_PULL_MS else FRESH_MS)) {
-            return@withLock fromXml(saved.xml, saved.fetchedAt, null)
-        }
-        val wait = backoffUntil - SystemClock.elapsedRealtime()
-        if (wait > 0) {
-            val msg = "Reddit asked Lurk to slow down. Try again in ${minutes(wait)}."
-            if (saved != null) return@withLock fromXml(saved.xml, saved.fetchedAt, msg)
-            throw ServiceException(msg)
-        }
-
-        val gap = lastRequestAt + REQUEST_GAP_MS - SystemClock.elapsedRealtime()
-        if (gap > 0) delay(gap)
-        lastRequestAt = SystemClock.elapsedRealtime()
-
-        val result = fetch("$url&limit=$PAGE" + (cursor?.let { "&after=$it" } ?: ""))
-        when {
-            result.status == 200 -> {
-                backoffMs = 0
-                val now = System.currentTimeMillis()
-                if (cursor == null) {
-                    runCatching { cacheFile.writeText(result.body) }
-                    cached = Cached(result.body, now)
-                }
-                fromXml(result.body, now, null)
-            }
-            result.status == 429 -> {
-                backoffMs = (backoffMs * 2).coerceIn(MIN_BACKOFF_MS, MAX_BACKOFF_MS)
-                    .coerceAtLeast(result.retryAfterMs ?: 0)
-                backoffUntil = SystemClock.elapsedRealtime() + backoffMs
-                log.note("RSS: rate limited, waiting ${minutes(backoffMs)}")
-                val msg = "Reddit asked Lurk to slow down. Try again in ${minutes(backoffMs)}."
-                if (saved != null) fromXml(saved.xml, saved.fetchedAt, msg) else throw ServiceException(msg)
-            }
-            else -> {
-                val msg = when (result.status) {
-                    0 -> "Couldn't reach Reddit. Check your connection."
-                    401, 403, 404 -> "Reddit didn't accept the feed link. It changes if you sign out everywhere; paste a new one."
-                    in 300..399 -> "Reddit didn't accept the feed link. Paste a new one from reddit.com/prefs/feeds."
-                    else -> "Reddit returned an error (${result.status})."
-                }
-                if (saved != null) fromXml(saved.xml, saved.fetchedAt, "$msg Showing what Lurk saved.") else throw ServiceException(msg)
-            }
+    private fun save(key: String, xml: String, at: Long) {
+        cached[key] = Cached(xml, at)
+        runCatching {
+            cacheDir.mkdirs()
+            File(cacheDir, "$key.xml").writeText(xml)
+            // Keep the most recent feeds only.
+            cacheDir.listFiles()?.sortedByDescending { it.lastModified() }?.drop(MAX_SAVED)?.forEach { it.delete() }
         }
     }
 
-    private fun fromXml(xml: String, fetchedAt: Long, notice: String?): RssPage {
-        val posts = runCatching { parse(xml) }.getOrElse {
+    fun clearCache() {
+        cached.clear()
+        runCatching { cacheDir.deleteRecursively() }
+    }
+
+    /** Whether [community]'s saved first page (Home for null) is old enough to fetch again unasked. */
+    fun isStale(community: String?): Boolean =
+        (saved(key(community))?.fetchedAt ?: 0L).let { System.currentTimeMillis() - it > FRESH_MS }
+
+    private val mutex = Mutex()
+    private var lastRequestAt = 0L
+    /** The front page's own backoff, after a 429. */
+    private var frontBackoffUntil = 0L
+    private var frontBackoffMs = 0L
+    /** When the public feeds' limit lets the next request through (elapsedRealtime). */
+    private var publicReadyAt = 0L
+    /** Whether subreddit feeds accept the feed link's credentials. Null: not tried yet. */
+    private var subredditAuth: Boolean? = null
+
+    /**
+     * A page of [community]'s posts (Home for null). [cursor] null is the first page;
+     * [force] is a pull to refresh.
+     */
+    suspend fun page(community: String?, cursor: String?, force: Boolean): FeedPage {
+        val link = link ?: throw ServiceException("Add your front page feed link first")
+        val key = key(community)
+        val saved = if (cursor == null) saved(key) else null
+        val age = saved?.let { System.currentTimeMillis() - it.fetchedAt }
+        if (saved != null && age!! < (if (force) MIN_PULL_MS else FRESH_MS)) return fromXml(saved, null)
+
+        return if (community == null) front(link, cursor, saved) else subreddit(link, community, key, cursor, saved, force)
+    }
+
+    private suspend fun front(link: String, cursor: String?, saved: Cached?): FeedPage {
+        val wait = frontBackoffUntil - SystemClock.elapsedRealtime()
+        if (wait > 0) return savedOr(saved, "Reddit asked Lurk to slow down. Try again in ${minutes(wait)}.")
+
+        val result = request("$link&limit=$PAGE" + (cursor?.let { "&after=$it" } ?: ""))
+        return when (result.status) {
+            200 -> {
+                frontBackoffMs = 0
+                fresh("front", result.body, cursor)
+            }
+            429 -> {
+                frontBackoffMs = (frontBackoffMs * 2).coerceIn(MIN_BACKOFF_MS, MAX_BACKOFF_MS)
+                    .coerceAtLeast(result.retryAfterMs ?: 0)
+                frontBackoffUntil = SystemClock.elapsedRealtime() + frontBackoffMs
+                log.note("RSS: rate limited, waiting ${minutes(frontBackoffMs)}")
+                savedOr(saved, "Reddit asked Lurk to slow down. Try again in ${minutes(frontBackoffMs)}.")
+            }
+            401, 403, 404, in 300..399 -> throw FeedLinkRejected(
+                "Reddit no longer accepts this feed link. It changes when you sign out everywhere; " +
+                    "sign in again with a new one from reddit.com/prefs/feeds.",
+            )
+            else -> savedOr(saved, failure(result.status))
+        }
+    }
+
+    private suspend fun subreddit(link: String, community: String, key: String, cursor: String?, saved: Cached?, force: Boolean): FeedPage {
+        // Waiting on the limit with a saved copy to hand: show that, unless this is a pull.
+        val wait = publicReadyAt - SystemClock.elapsedRealtime()
+        if (saved != null && !force && wait > SHOW_SAVED_AFTER_MS) {
+            return fromXml(saved, "Saved ${ago(saved.fetchedAt)}. Reddit allows one subreddit feed a minute; pull for new posts after that.")
+        }
+        val credentials = link.substringAfter('?')
+        fun url(auth: Boolean) = "https://www.reddit.com/r/${Uri.encode(community, "+")}/.rss?" +
+            (if (auth) "$credentials&" else "") + "limit=$PAGE" + (cursor?.let { "&after=$it" } ?: "")
+
+        var auth = subredditAuth != false
+        repeat(3) {
+            awaitPublic()
+            val result = request(url(auth))
+            when {
+                result.status == 200 -> {
+                    if (auth) subredditAuth = true
+                    return fresh(key, result.body, cursor)
+                }
+                result.status == 429 -> {
+                    // Waits once more if it's a short one; past that, give up for now.
+                    if (publicReadyAt - SystemClock.elapsedRealtime() > MAX_WAIT_MS) {
+                        return savedOr(saved, "Reddit is limiting subreddit feeds right now. Try again in a minute or two.")
+                    }
+                }
+                auth && result.status != 0 && result.status != 404 -> {
+                    log.note("RSS: subreddit feeds don't take the feed link; trying without")
+                    subredditAuth = false
+                    auth = false
+                }
+                result.status == 404 || result.status in 300..399 ->
+                    throw ServiceException("Reddit has no feed for r/$community. It may be private or banned.")
+                else -> return savedOr(saved, failure(result.status))
+            }
+        }
+        return savedOr(saved, "Reddit is limiting subreddit feeds right now. Try again in a minute or two.")
+    }
+
+    /** Waits for the public limit, counting down in [waiting]. */
+    private suspend fun awaitPublic() {
+        try {
+            while (true) {
+                val left = publicReadyAt - SystemClock.elapsedRealtime()
+                if (left <= 0) break
+                waiting = "Reddit allows one subreddit feed a minute. Loading in ${(left + 999) / 1000} s…"
+                delay(left.coerceAtMost(1_000))
+            }
+        } finally {
+            waiting = null
+        }
+    }
+
+    private fun fresh(key: String, xml: String, cursor: String?): FeedPage {
+        val now = System.currentTimeMillis()
+        val page = fromXml(Cached(xml, now), null)
+        if (cursor == null) save(key, xml, now)
+        return page
+    }
+
+    private fun savedOr(saved: Cached?, message: String): FeedPage =
+        if (saved != null) fromXml(saved, message) else throw ServiceException(message)
+
+    private fun fromXml(c: Cached, notice: String?): FeedPage {
+        val posts = runCatching { parse(c.xml) }.getOrElse {
             throw ServiceException("Reddit sent a feed Lurk couldn't read")
         }
         // A short page is the end.
         val after = posts.lastOrNull()?.name?.takeIf { posts.size >= PAGE / 2 }
-        return RssPage(FeedPage(posts, after), fetchedAt, notice)
+        return FeedPage(posts, after, fetchedAt = c.fetchedAt, notice = notice)
+    }
+
+    private fun failure(status: Int) = when (status) {
+        0 -> "Couldn't reach Reddit. Check your connection."
+        else -> "Reddit returned an error ($status)."
     }
 
     private class Fetched(val status: Int, val body: String, val retryAfterMs: Long?)
 
-    private suspend fun fetch(url: String): Fetched = withContext(Dispatchers.IO) {
+    /** One request, spaced from the last, noting what Reddit says about the public limit. */
+    private suspend fun request(url: String): Fetched = mutex.withLock {
+        val gap = lastRequestAt + REQUEST_GAP_MS - SystemClock.elapsedRealtime()
+        if (gap > 0) delay(gap)
+        lastRequestAt = SystemClock.elapsedRealtime()
+        withContext(Dispatchers.IO) { fetch(url) }.also { r ->
+            if (r.status == 429) {
+                publicReadyAt = SystemClock.elapsedRealtime() + (r.retryAfterMs ?: 60_000L).coerceAtLeast(5_000L)
+            }
+        }
+    }
+
+    private fun fetch(url: String): Fetched {
         val shown = url.replace(Regex("feed=[^&]+"), "feed=…").removePrefix("https://www.reddit.com")
         val conn = URL(url).openConnection() as HttpURLConnection
-        try {
+        return try {
             conn.connectTimeout = 15_000
             conn.readTimeout = 20_000
             conn.instanceFollowRedirects = false
             conn.setRequestProperty("User-Agent", "Lurk/$build (personal RSS reader; Android)")
             val status = conn.responseCode
             val body = if (status == 200) conn.inputStream.bufferedReader().use { it.readText() } else ""
-            val retry = listOf("retry-after", "x-ratelimit-reset")
-                .firstNotNullOfOrNull { conn.getHeaderField(it)?.toDoubleOrNull() }?.let { (it * 1000).toLong() }
-            log.note("RSS $shown -> HTTP $status")
+            val remaining = conn.getHeaderField("x-ratelimit-remaining")?.toDoubleOrNull()
+            val reset = conn.getHeaderField("x-ratelimit-reset")?.toDoubleOrNull()
+            // Used up: the next public request waits for the window to reset.
+            if (remaining != null && remaining < 1 && reset != null) {
+                publicReadyAt = SystemClock.elapsedRealtime() + (reset * 1000).toLong() + 500
+            }
+            val retry = (conn.getHeaderField("retry-after")?.toDoubleOrNull() ?: reset)?.let { (it * 1000).toLong() }
+            log.note("RSS $shown -> HTTP $status" + (remaining?.let { " (limit left: ${it.toInt()}, resets in ${reset?.toInt()} s)" } ?: ""))
             Fetched(status, body, retry)
         } catch (e: Exception) {
             log.note("RSS $shown -> failed: ${e.message}")
@@ -153,18 +253,32 @@ class RedditRss(context: Context, accountId: String, private val build: Int, pri
     }
 
     companion object {
-        /** Opening the app shows the saved page if it's newer than this; older, it's fetched again. */
+        /** A saved page newer than this shows without fetching; older, it's fetched again. */
         const val FRESH_MS = 10 * 60_000L
         /** A pull within this long of the last fetch shows the saved page. */
         const val MIN_PULL_MS = 60_000L
         private const val REQUEST_GAP_MS = 2_000L
         private const val MIN_BACKOFF_MS = 2 * 60_000L
         private const val MAX_BACKOFF_MS = 30 * 60_000L
+        /** Longer than this waiting for the limit, a saved copy shows instead. */
+        private const val SHOW_SAVED_AFTER_MS = 3_000L
+        /** Longer than this, stop waiting and say so. */
+        private const val MAX_WAIT_MS = 90_000L
+        private const val MAX_SAVED = 60
         private const val PAGE = 100
 
         private fun minutes(ms: Long): String {
             val m = (ms + 59_999) / 60_000
             return if (m <= 1) "a minute" else "$m minutes"
+        }
+
+        private fun ago(at: Long): String {
+            val m = (System.currentTimeMillis() - at) / 60_000
+            return when {
+                m < 1 -> "just now"
+                m < 60 -> "$m min ago"
+                else -> "${m / 60} h ago"
+            }
         }
 
         private val linkRe = Regex("""<a href="([^"]+)">\[link]</a>""")

@@ -20,8 +20,6 @@ class FeedScreen(
     sort: Sort?,
     private val service: Service,
     private val scope: CoroutineScope,
-    /** Home from Reddit's RSS front page instead of [service] (while Reddit blocks Lurk's browser). */
-    val rss: RedditRss? = null,
 ) : Screen {
     var sort by mutableStateOf(sort)
         private set
@@ -39,7 +37,7 @@ class FeedScreen(
     var listState by mutableStateOf(LazyListState())
         private set
 
-    /** RSS: when the posts shown were fetched (ms), and anything about that to show over them. */
+    /** When the posts shown were fetched (ms), and anything about that to show over them, for services that say (RSS). */
     var fetchedAt by mutableStateOf<Long?>(null)
         private set
     var notice by mutableStateOf<String?>(null)
@@ -60,6 +58,9 @@ class FeedScreen(
     /** Feeds that mix communities show each post's. */
     val showsCommunity: Boolean get() = service.isMixed(community)
 
+    /** What a slow first load is waiting on, e.g. Reddit's RSS rate limit. */
+    val loadingNote: String? get() = service.loadingNote
+
     fun loadMore() {
         if (loading || endReached) return
         val gen = generation
@@ -67,17 +68,12 @@ class FeedScreen(
         error = null
         job = scope.launch {
             try {
-                val page = if (rss != null) {
-                    val first = after == null
-                    val got = rss.page(after, force = force && first)
-                    if (gen != generation) return@launch
-                    if (first) {
-                        fetchedAt = got.fetchedAt
-                        notice = got.notice
-                    }
-                    got.page
-                } else {
-                    service.feed(community, sort, after)
+                val first = after == null
+                val page = service.feed(community, sort, after, refresh = force && first)
+                if (gen != generation) return@launch
+                if (first) {
+                    fetchedAt = page.fetchedAt
+                    notice = page.notice
                 }
                 force = false
                 if (gen != generation) return@launch
@@ -95,7 +91,14 @@ class FeedScreen(
         }
     }
 
-    /** [pulled]: asked for by the user, so an RSS Home fetches even a fairly new page. */
+    /** Stops a load in progress, once the screen is gone. */
+    fun cancel() {
+        generation++
+        job?.cancel()
+        loading = false
+    }
+
+    /** [pulled]: asked for by the user, so a service that keeps pages (RSS) fetches even a fairly new one. */
     fun refresh(pulled: Boolean = true) {
         force = pulled
         generation++
