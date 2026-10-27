@@ -38,6 +38,9 @@ class AccountSession(
     private val scope = MainScope()
     private val profile = store.profileFor(accountId)
     private val seenCommunities = SeenCommunities(context, accountId)
+    private val build: Int = context.packageManager.getPackageInfo(context.packageName, 0).let {
+        if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode.toInt() else @Suppress("DEPRECATION") it.versionCode
+    }
 
     val service: Service = store.find(accountId).let { a ->
         when (a?.kind ?: ServiceKind.Reddit) {
@@ -257,6 +260,23 @@ class AccountSession(
         if (browser.url == null || (service.kind == ServiceKind.Reddit && RedditLinks.isSignInPage(browser.url))) return false
         push(screenFor(route))
         return true
+    }
+
+    /** Engine debug's "Test RSS" is running. */
+    var rssTesting by mutableStateOf(false)
+        private set
+
+    /** Engine debug: how many Reddit RSS requests this connection gets. See [RssProbe]. */
+    fun testRss() {
+        if (rssTesting) return
+        rssTesting = true
+        scope.launch {
+            try {
+                RssProbe.run(service.log, build)
+            } finally {
+                rssTesting = false
+            }
+        }
     }
 
     fun requestSync() {

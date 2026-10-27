@@ -531,6 +531,8 @@ private fun AccountContent(
                 open = debugOpen,
                 syncing = session.syncing,
                 onSync = { session.requestSync() },
+                onTestRss = if (service.kind == ServiceKind.Reddit) ({ session.testRss() }) else null,
+                rssTesting = session.rssTesting,
                 onClose = { debugOpen = false },
             )
         }
@@ -941,6 +943,9 @@ private fun BoxScope.EngineHost(
     open: Boolean,
     syncing: Boolean,
     onSync: () -> Unit,
+    /** Reddit only: checks Reddit's RSS rate limit from this phone. */
+    onTestRss: (() -> Unit)?,
+    rssTesting: Boolean,
     onClose: () -> Unit,
 ) {
     if (!open) {
@@ -965,6 +970,11 @@ private fun BoxScope.EngineHost(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
                 Text("Engine debug", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                if (onTestRss != null) {
+                    TextButton(onClick = onTestRss, enabled = !rssTesting) {
+                        Text(if (rssTesting) "Testing…" else "Test RSS")
+                    }
+                }
                 TextButton(onClick = onSync, enabled = !syncing) {
                     Text(if (syncing) "Syncing…" else "Run sync")
                 }
