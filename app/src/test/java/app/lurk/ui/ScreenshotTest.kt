@@ -180,7 +180,7 @@ class ScreenshotTest {
             app.lurk.data.Account("e", username = "secret", pinHash = "x", pinSalt = "y"),
         )
         val noop = {}
-        val actions = AccountActions(noop, noop, {}, {}, noop, noop, {}, noop, noop, noop)
+        val actions = AccountActions(noop, noop, {}, {}, noop, noop, noop, {}, noop, noop, noop)
         compose.setContent {
             LurkTheme(darkOverride = dark) {
                 androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow) {

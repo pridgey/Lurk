@@ -61,6 +61,12 @@ class AccountSession(
         }
     }
     val links get() = service.links
+
+    /** Reddit's RSS front page, for Home while Reddit blocks Lurk's browser. Null for other sites. */
+    val rss: RedditRss? = if (service.kind == ServiceKind.Reddit) RedditRss(context, accountId, build, service.log) else null
+
+    /** Home comes from [rss]: Chrome mode, with a feed link given. */
+    val rssHome: Boolean get() = inChrome && rss?.link != null
     val actions = Actions(service, scope, signedIn = { account?.username != null }, onMessage = onMessage)
     val browser = BrowserController(
         context, profile, scripts, service.links, onExternal,
@@ -159,7 +165,25 @@ class AccountSession(
     // --- Navigation ---
 
     fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen =
-        FeedScreen(community, sort, service, scope).also { it.loadMore() }
+        FeedScreen(community, sort, service, scope, rss = rss.takeIf { community == null && rssHome }).also { it.loadMore() }
+
+    /** Sets (or with null, removes) the RSS front page link, and opens Home on it. */
+    fun setRssLink(url: String?) {
+        rss?.changeLink(url)
+        reset(feed(null))
+    }
+
+    /**
+     * Back in the app: an RSS Home that's been away a while checks for new posts, but only
+     * from the top of the list, so it never yanks you from where you were reading.
+     */
+    fun onResume() {
+        val home = current as? FeedScreen ?: return
+        val rss = home.rss ?: return
+        if (stack.size == 1 && rss.isStale && !home.loading && home.listState.firstVisibleItemIndex == 0) {
+            home.refresh(pulled = false)
+        }
+    }
 
     fun thread(ref: String, preview: Post? = null): ThreadScreen =
         ThreadScreen(ref, preview, service, scope).also { it.load() }
@@ -221,12 +245,25 @@ class AccountSession(
         stack += screen
     }
 
-    fun openWeb(url: String) = push(WebScreen(url))
+    fun openWeb(url: String) {
+        if (inChrome) openInChrome(chromeUrl(url)) else push(WebScreen(url))
+    }
+
+    /** Chrome mode opens www.reddit.com, which Chrome's own sign-in covers. */
+    private fun chromeUrl(url: String): String {
+        val uri = Uri.parse(url)
+        return if (links.isSiteHost(uri.host.orEmpty())) {
+            uri.buildUpon().scheme("https").authority("www.reddit.com").build().toString()
+        } else {
+            url
+        }
+    }
 
     /** Opens a link from a native screen: natively if possible, else images, web or outside. */
     fun openLink(raw: String) {
         val uri = links.resolve(raw)
         links.route(uri)?.let {
+            if (inChrome) return openInChrome(chromeUrl(uri.toString()))
             push(screenFor(it))
             return
         }
@@ -341,6 +378,7 @@ class AccountSession(
         val name = account?.label
         (service as? LemmyService)?.let { lemmy -> scope.launch { runCatching { lemmy.logOut() } } }
         (service as? BlueskyService)?.let { bluesky -> scope.launch { runCatching { bluesky.logOut() } } }
+        rss?.changeLink(null) // the link reads this account's front page
         if (store.multiProfile) {
             store.remove(accountId) // switches the UI away, which destroys this session
             WebProfiles.wipe(profile)

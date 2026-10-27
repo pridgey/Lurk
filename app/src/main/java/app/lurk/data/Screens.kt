@@ -20,6 +20,8 @@ class FeedScreen(
     sort: Sort?,
     private val service: Service,
     private val scope: CoroutineScope,
+    /** Home from Reddit's RSS front page instead of [service] (while Reddit blocks Lurk's browser). */
+    val rss: RedditRss? = null,
 ) : Screen {
     var sort by mutableStateOf(sort)
         private set
@@ -37,9 +39,17 @@ class FeedScreen(
     var listState by mutableStateOf(LazyListState())
         private set
 
+    /** RSS: when the posts shown were fetched (ms), and anything about that to show over them. */
+    var fetchedAt by mutableStateOf<Long?>(null)
+        private set
+    var notice by mutableStateOf<String?>(null)
+        private set
+
     private var after: String? = null
     private var job: Job? = null
     private var generation = 0
+    /** The next first-page load is a pull to refresh. */
+    private var force = false
 
     val label: String
         get() = community?.let { c ->
@@ -57,7 +67,19 @@ class FeedScreen(
         error = null
         job = scope.launch {
             try {
-                val page = service.feed(community, sort, after)
+                val page = if (rss != null) {
+                    val first = after == null
+                    val got = rss.page(after, force = force && first)
+                    if (gen != generation) return@launch
+                    if (first) {
+                        fetchedAt = got.fetchedAt
+                        notice = got.notice
+                    }
+                    got.page
+                } else {
+                    service.feed(community, sort, after)
+                }
+                force = false
                 if (gen != generation) return@launch
                 val seen = posts.mapTo(HashSet()) { it.name }
                 posts.addAll(page.posts.filter { seen.add(it.name) })
@@ -73,7 +95,9 @@ class FeedScreen(
         }
     }
 
-    fun refresh() {
+    /** [pulled]: asked for by the user, so an RSS Home fetches even a fairly new page. */
+    fun refresh(pulled: Boolean = true) {
+        force = pulled
         generation++
         job?.cancel()
         posts.clear()

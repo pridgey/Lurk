@@ -74,6 +74,8 @@ data class Post(
     val bodyImages: List<InlineImage> = emptyList(),
     /** The post's canonical web page, for sharing, when the site gives one. */
     val shareUrl: String? = null,
+    /** False where the source has no score, comment count, votes or saves (Reddit's RSS). */
+    val hasStats: Boolean = true,
 )
 
 /** A row in a comment thread: a comment, or a "load more" placeholder. */

@@ -69,7 +69,14 @@ import kotlinx.coroutines.flow.filter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FeedView(screen: FeedScreen, actions: Actions, on: PostHandlers, onViewOnWeb: () -> Unit) {
+fun FeedView(
+    screen: FeedScreen,
+    actions: Actions,
+    on: PostHandlers,
+    onViewOnWeb: () -> Unit,
+    /** Shown above the posts, e.g. where an RSS Home's posts come from. */
+    header: (@Composable () -> Unit)? = null,
+) {
     // Load the next page when the list gets near its end.
     LaunchedEffect(screen) {
         snapshotFlow {
@@ -91,6 +98,7 @@ fun FeedView(screen: FeedScreen, actions: Actions, on: PostHandlers, onViewOnWeb
         if (screen.posts.isEmpty()) {
             // A list even when empty, so there's something to pull on.
             LazyColumn(Modifier.fillMaxSize()) {
+                header?.let { item(key = "header") { it() } }
                 item {
                     val error = screen.error
                     when {
@@ -116,6 +124,7 @@ fun FeedView(screen: FeedScreen, actions: Actions, on: PostHandlers, onViewOnWeb
             contentPadding = PaddingValues(top = 6.dp, bottom = 12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
+            header?.let { item(key = "header") { it() } }
             items(screen.posts, key = { it.name }) { post ->
                 PostCard(post, screen.showsCommunity, actions, on)
             }

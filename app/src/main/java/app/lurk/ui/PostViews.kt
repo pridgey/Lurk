@@ -439,6 +439,17 @@ private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onCommen
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 8.dp),
     ) {
+        if (!post.hasStats) {
+            // No numbers to show: just the way to the comments, on the site.
+            Pill(onClick = onComments ?: { on.openOnWeb(post) }) {
+                Icon(LurkIcons.Comment, null, Modifier.size(18.dp))
+                Text("Comments", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp))
+                Icon(LurkIcons.External, null, Modifier.padding(start = 6.dp).size(14.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            RoundIcon(LurkIcons.Share, "Share", MaterialTheme.colorScheme.onSurfaceVariant) { on.share(post) }
+            return@Row
+        }
         VotePill(post.name, post.score, post.likes, actions)
         Pill(onClick = onComments) {
             Icon(LurkIcons.Comment, null, Modifier.size(18.dp))

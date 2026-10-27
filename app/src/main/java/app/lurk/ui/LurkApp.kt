@@ -1,5 +1,8 @@
 package app.lurk.ui
 
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.Lifecycle
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -211,6 +214,7 @@ private fun AccountContent(
     var addingLemmy by remember { mutableStateOf(false) }
     var addingBluesky by remember { mutableStateOf(false) }
     var rssSetup by remember { mutableStateOf(false) }
+    var rssLinkOpen by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     val service = session.service
     val links = session.links
@@ -221,7 +225,19 @@ private fun AccountContent(
 
     // Reddit blocking Lurk's browser: Reddit pages open in Chrome tabs instead.
     val inChrome = session.inChrome
-    val goHome: () -> Unit = { if (inChrome) session.openInChrome(RedditAccess.Urls.HOME) else session.reset(session.feed(null)) }
+    // ...except Home, when it comes from the front page's RSS feed.
+    val rssShown = screen is FeedScreen && screen.rss != null
+    val goHome: () -> Unit = {
+        if (inChrome && !session.rssHome) session.openInChrome(RedditAccess.Urls.HOME) else session.reset(session.feed(null))
+    }
+
+    // Back in the app after a while: an RSS Home checks for new posts.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, session) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) session.onResume() }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     val goCommunity: (String) -> Unit = { name ->
         if (inChrome) session.openInChrome(RedditAccess.Urls.community(name)) else session.reset(session.feed(name))
     }
@@ -229,15 +245,20 @@ private fun AccountContent(
 
     val handlers = remember(session) {
         PostHandlers(
-            openThread = { post -> session.push(session.thread(post.threadRef, post)) },
+            openThread = { post ->
+                if (session.inChrome) session.openWeb(post.shareUrl ?: session.links.thread(post.threadRef))
+                else session.push(session.thread(post.threadRef, post))
+            },
             openLink = { url -> session.openLink(url) },
             openImage = { url, preview ->
                 session.viewingPreview = preview?.takeIf { it != url }
                 session.viewingImage = url
             },
-            openCommunity = { name -> session.push(session.feed(name)) },
+            openCommunity = { name ->
+                if (session.inChrome) session.openInChrome(RedditAccess.Urls.community(name)) else session.push(session.feed(name))
+            },
             openUser = { name -> session.openWeb(session.links.user(name)) },
-            openRef = { ref -> session.push(session.thread(ref)) },
+            openRef = { ref -> if (session.inChrome) session.openWeb(session.links.thread(ref)) else session.push(session.thread(ref)) },
             openOnWeb = { post -> session.openWeb(session.links.thread(post.threadRef)) },
             share = { post -> sharePost(context, post, session.links.share(post)) },
             openVideo = { post, startMs -> session.openVideo(post, startMs) },
@@ -278,7 +299,7 @@ private fun AccountContent(
         is ThreadScreen -> screen.post?.let { post -> post.community?.let(::shortCommunity) } ?: "Comments"
         is DiscoverScreen -> "Discover"
         is WebScreen -> links.locate(browser.url).label
-    }.let { if (inChrome) "Reddit" else it }
+    }.let { if (inChrome && !rssShown) "Reddit" else it }
     val titleCommunity = when (screen) {
         is FeedScreen -> screen.community?.let { c ->
             service.fixedFeeds.firstOrNull { it.community == c }?.label?.lowercase() ?: c
@@ -506,17 +527,25 @@ private fun AccountContent(
                 .consumeWindowInsets(padding)
                 .imePadding(),
         ) {
-            if (inChrome) {
+            if (inChrome && !rssShown) {
                 RedditChromeView(
                     subreddits = account.communities,
                     onOpen = session::openInChrome,
                     onRetry = { session.retryLurkBrowser() },
+                    onSetUpRss = { rssLinkOpen = true },
                 )
             } else key(screen) {
                 when (screen) {
                     is FeedScreen -> FeedView(
                         screen, session.actions, handlers,
                         onViewOnWeb = { session.openWeb(screen.webUrl) },
+                        header = if (screen.rss == null) null else ({
+                            RssHomeHeader(
+                                screen,
+                                onFeedLink = { rssLinkOpen = true },
+                                onRetryBrowser = { session.retryLurkBrowser() },
+                            )
+                        }),
                     )
                     is ThreadScreen -> ThreadView(screen, session.actions, handlers, onMessage)
                     is DiscoverScreen -> DiscoverView(
@@ -594,6 +623,18 @@ private fun AccountContent(
                 onExternalLink = { uri -> openExternal(context, uri) },
             )
         }
+    }
+
+    if (rssLinkOpen) {
+        RssLinkDialog(
+            saved = session.rss?.link,
+            suggested = RssProbe.savedFrontPage(context),
+            onSave = { link ->
+                rssLinkOpen = false
+                session.setRssLink(link)
+            },
+            onCancel = { rssLinkOpen = false },
+        )
     }
 
     if (session.signingIn && service.kind == ServiceKind.Bluesky) {

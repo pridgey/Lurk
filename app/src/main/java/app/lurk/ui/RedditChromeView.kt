@@ -37,6 +37,8 @@ fun RedditChromeView(
     subreddits: List<String>,
     onOpen: (url: String) -> Unit,
     onRetry: () -> Unit,
+    /** Set up Home from the front page's RSS feed. */
+    onSetUpRss: () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -67,6 +69,25 @@ fun RedditChromeView(
                         TextButton(onClick = { onOpen(RedditAccess.Urls.community("all")) }) { Text("All") }
                         TextButton(onClick = { onOpen(RedditAccess.Urls.COMMUNITIES) }) { Text("Discover") }
                     }
+                }
+            }
+        }
+        item(key = "rss") {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            ) {
+                Column(Modifier.padding(20.dp)) {
+                    Text("Your front page in Lurk", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Lurk can still show your front page's posts, from Reddit's RSS feed. " +
+                            "Comments and votes stay in Chrome.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onSetUpRss, modifier = Modifier.padding(top = 4.dp)) { Text("Set it up") }
                 }
             }
         }
