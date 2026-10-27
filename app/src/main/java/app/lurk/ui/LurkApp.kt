@@ -531,7 +531,7 @@ private fun AccountContent(
                 open = debugOpen,
                 syncing = session.syncing,
                 onSync = { session.requestSync() },
-                onTestRss = if (service.kind == ServiceKind.Reddit) ({ session.testRss() }) else null,
+                onTestRss = { session.testRss() }, // public feeds: no Reddit sign-in needed
                 rssTesting = session.rssTesting,
                 onClose = { debugOpen = false },
             )
@@ -943,7 +943,7 @@ private fun BoxScope.EngineHost(
     open: Boolean,
     syncing: Boolean,
     onSync: () -> Unit,
-    /** Reddit only: checks Reddit's RSS rate limit from this phone. */
+    /** Checks Reddit's RSS rate limit from this phone, from any account. */
     onTestRss: (() -> Unit)?,
     rssTesting: Boolean,
     onClose: () -> Unit,
