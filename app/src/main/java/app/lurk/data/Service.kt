@@ -11,7 +11,7 @@ import java.util.Date
 import java.util.Locale
 
 /** The sites Lurk can read. Each account belongs to one. */
-enum class ServiceKind { Reddit, Lemmy }
+enum class ServiceKind { Reddit, Lemmy, Bluesky }
 
 /** A sort order as a site names it: [key] is sent to the site, [label] is shown. */
 data class Sort(val key: String, val label: String)
@@ -21,12 +21,16 @@ data class FixedFeed(val community: String, val label: String)
 
 /** How a site names things on screen. */
 interface Naming {
-    /** "subreddit", "community". */
+    /** "subreddit", "community", "feed". */
     val communityNoun: String
+    /** What a community's size counts, after the number: "members" (Bluesky feeds: "likes"). */
+    val memberNoun: String get() = "members"
     /** "r/pics", "c/pics". */
     fun community(name: String): String
     /** "u/name", "name@instance". */
     fun user(name: String): String
+    /** A community's own name as words, for sorting, avatars and lists: [name] itself, except where names are ids. */
+    fun label(name: String): String = name
     /** A short label for the bottom bar, given every subscription so it can stay unambiguous. */
     fun chip(name: String, all: List<String>): String = name
     /** [typed] with any "r/"-style prefix removed. */
@@ -124,6 +128,9 @@ interface Service {
 
     /** The sort Discover uses to show a community's best recent posts. */
     val peekSort: Sort?
+
+    /** The heading over those posts on a Discover card. */
+    val peekLabel: String get() = peekSort?.label ?: "Latest posts"
 
     /**
      * Subscribes to (or leaves) [community], a name as [subscriptions] and feeds give it.

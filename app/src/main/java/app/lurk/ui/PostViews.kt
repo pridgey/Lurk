@@ -111,7 +111,8 @@ fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandl
                 )
             }
             PostTags(post)
-            if (post.isSelf && post.selftext.isNotBlank()) {
+            // Sites without titles (Bluesky) show the text of link posts too.
+            if ((post.isSelf || post.title.isBlank()) && post.selftext.isNotBlank()) {
                 // Without a title, the text is the post: show more of it, in full color.
                 val untitled = post.title.isBlank()
                 Text(

@@ -62,6 +62,7 @@ class AccountActions(
     val signInTo: (Account) -> Unit,
     val addReddit: () -> Unit,
     val addLemmy: () -> Unit,
+    val addBluesky: () -> Unit,
     val setNsfw: (Boolean) -> Unit,
     val setPin: () -> Unit,
     val removePin: () -> Unit,
@@ -161,6 +162,7 @@ internal fun AccountSheetContent(
             SectionHeader("Add account")
             ActionRow(Icons.Default.Add, "Reddit", onClick = { pick(actions.addReddit) })
             ActionRow(Icons.Default.Add, "Lemmy", onClick = { pick(actions.addLemmy) })
+            ActionRow(Icons.Default.Add, "Bluesky", onClick = { pick(actions.addBluesky) })
         }
 
         val canRemove = current.signedIn || current.expired || (multiProfile && accounts.size > 1)

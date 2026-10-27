@@ -208,6 +208,7 @@ private fun AccountContent(
     var settingPin by remember { mutableStateOf(false) }
     var confirmRemovePin by remember { mutableStateOf(false) }
     var addingLemmy by remember { mutableStateOf(false) }
+    var addingBluesky by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     val service = session.service
     val links = session.links
@@ -340,6 +341,7 @@ private fun AccountContent(
                     }
                 },
                 addLemmy = { addingLemmy = true },
+                addBluesky = { addingBluesky = true },
                 setNsfw = { on -> store.update(account.id) { it.copy(showNsfw = on) } },
                 setPin = { settingPin = true },
                 removePin = { confirmRemovePin = true },
@@ -398,7 +400,7 @@ private fun AccountContent(
                         },
                     ) {
                         when {
-                            titleCommunity != null -> Avatar(titleCommunity, 36.dp)
+                            titleCommunity != null -> Avatar(naming.label(titleCommunity), 36.dp)
                             screen is FeedScreen -> HomeBadge()
                             screen is DiscoverScreen -> HomeBadge(LurkIcons.Compass)
                         }
@@ -592,7 +594,13 @@ private fun AccountContent(
         }
     }
 
-    if (session.signingIn) {
+    if (session.signingIn && service.kind == ServiceKind.Bluesky) {
+        BlueskyLoginDialog(
+            knownHandle = account.knownAs,
+            onSignedIn = { login -> session.onBlueskySignedIn(login) },
+            onCancel = { session.signingIn = false },
+        )
+    } else if (session.signingIn) {
         LemmyLoginDialog(
             instance = account.instance,
             knownUser = account.knownAs,
@@ -623,6 +631,39 @@ private fun AccountContent(
                 }
             },
             onCancel = { addingLemmy = false },
+        )
+    }
+
+    if (addingBluesky) {
+        BlueskyLoginDialog(
+            knownHandle = null,
+            onSignedIn = { login ->
+                addingBluesky = false
+                val existing = store.accounts.firstOrNull {
+                    it.kind == ServiceKind.Bluesky && (it.username ?: it.knownAs).equals(login.handle, ignoreCase = true)
+                }
+                if (existing?.id == account.id) {
+                    session.onBlueskySignedIn(login) // this account, signed back in
+                } else if (existing != null) {
+                    store.update(existing.id) {
+                        it.copy(
+                            username = it.username ?: login.handle, knownAs = login.handle, instance = login.pds,
+                            token = login.accessToken, refreshToken = login.refreshToken,
+                        )
+                    }
+                    store.setActive(existing.id)
+                    onMessage("${existing.label} is already added, switched to it")
+                } else {
+                    val added = store.add(ServiceKind.Bluesky) {
+                        it.copy(
+                            username = login.handle, knownAs = login.handle, instance = login.pds,
+                            token = login.accessToken, refreshToken = login.refreshToken,
+                        )
+                    }
+                    store.setActive(added.id)
+                }
+            },
+            onCancel = { addingBluesky = false },
         )
     }
 
@@ -867,7 +908,7 @@ private fun SubredditBar(
                     }
                 }
                 items(account.communities, key = { "sub:" + it.lowercase() }) { name ->
-                    BarChip(naming.chip(name, account.communities), selected == name.lowercase(), { onSubreddit(name) }, avatar = name)
+                    BarChip(naming.chip(name, account.communities), selected == name.lowercase(), { onSubreddit(name) }, avatar = naming.label(name))
                 }
             }
         }

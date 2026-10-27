@@ -35,8 +35,10 @@ data class Account(
     val showNsfw: Boolean = false,
     /** Lemmy: the instance's host, e.g. "lemmy.world". */
     val instance: String? = null,
-    /** Lemmy: the login token (JWT) the instance issued. Null when signed out. */
+    /** Lemmy: the login token (JWT) the instance issued. Bluesky: the access token. Null when signed out. */
     val token: String? = null,
+    /** Bluesky: the token that renews [token]. Each renewal replaces both. */
+    val refreshToken: String? = null,
 ) {
     val locked: Boolean get() = pinHash != null
 
@@ -50,6 +52,7 @@ data class Account(
         get() = when (kind) {
             ServiceKind.Reddit -> "Reddit"
             ServiceKind.Lemmy -> instance ?: "Lemmy"
+            ServiceKind.Bluesky -> "Bluesky"
         }
 
     /** How the account is named in menus: "u/name", "name@lemmy.world". Kept while [expired]. */
@@ -58,6 +61,7 @@ data class Account(
             when (kind) {
                 ServiceKind.Reddit -> "u/$name"
                 ServiceKind.Lemmy -> "$name@$instance"
+                ServiceKind.Bluesky -> "@$name"
             }
         }
 }
@@ -147,7 +151,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
 
     /** The site ended [id]'s sign-in. Keeps its name, settings and cached communities. */
     fun expire(id: String) = update(id) {
-        if (it.username == null) it else it.copy(username = null, knownAs = it.username, token = null)
+        if (it.username == null) it else it.copy(username = null, knownAs = it.username, token = null, refreshToken = null)
     }
 
     /**
@@ -211,6 +215,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     showNsfw = o.optBoolean("showNsfw"),
                     instance = o.optString("instance").ifBlank { null },
                     token = o.optString("token").ifBlank { null },
+                    refreshToken = o.optString("refreshToken").ifBlank { null },
                 )
             }
         }.getOrDefault(emptyList())
@@ -231,7 +236,8 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     .put("showNsfw", a.showNsfw)
                     .put("kind", a.kind.name)
                     .put("instance", a.instance ?: "")
-                    .put("token", a.token ?: ""),
+                    .put("token", a.token ?: "")
+                    .put("refreshToken", a.refreshToken ?: ""),
             )
         }
         prefs.edit().putString(KEY_ACCOUNTS, arr.toString()).putString(KEY_ACTIVE, activeId).apply()

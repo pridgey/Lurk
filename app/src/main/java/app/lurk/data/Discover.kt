@@ -98,6 +98,9 @@ class DiscoverScreen(
 
     val webUrl: String get() = service.links.communities
 
+    /** The heading over a card's posts: "Top this week". */
+    val peekLabel: String get() = service.peekLabel
+
     /** Whether the first deal has begun. */
     var started by mutableStateOf(false)
         private set

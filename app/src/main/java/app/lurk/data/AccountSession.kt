@@ -50,6 +50,14 @@ class AccountSession(
                 token = a?.token,
                 onTokenRejected = { onLemmyTokenRejected() },
             )
+            ServiceKind.Bluesky -> BlueskyService(
+                context,
+                pds = a?.instance,
+                accessToken = a?.token,
+                refreshToken = a?.refreshToken,
+                onTokens = { access, refresh -> store.update(accountId) { it.copy(token = access, refreshToken = refresh) } },
+                onTokenRejected = { onLemmyTokenRejected() },
+            )
         }
     }
     val links get() = service.links
@@ -181,7 +189,7 @@ class AccountSession(
         val before = account?.communities ?: return
         fun apply(list: List<String>) = store.update(accountId) { it.copy(communities = list) }
         apply(
-            if (subscribed) (before.filterNot { it.equals(community, ignoreCase = true) } + community).sortedBy { it.lowercase() }
+            if (subscribed) (before.filterNot { it.equals(community, ignoreCase = true) } + community).sortedBy { service.naming.label(it).lowercase() }
             else before.filterNot { it.equals(community, ignoreCase = true) },
         )
         scope.launch {
@@ -303,7 +311,24 @@ class AccountSession(
         requestSync()
     }
 
-    /** The instance no longer accepts this account's token: it's signed out. */
+    /** Lurk's Bluesky sign-in form succeeded for this (signed-out) account. */
+    fun onBlueskySignedIn(login: BlueskyLogin) {
+        signingIn = false
+        (service as? BlueskyService)?.let {
+            it.pds = login.pds
+            it.accessToken = login.accessToken
+            it.refreshToken = login.refreshToken
+        }
+        store.update(accountId) {
+            it.copy(
+                username = login.handle, knownAs = login.handle, instance = login.pds,
+                token = login.accessToken, refreshToken = login.refreshToken,
+            )
+        }
+        requestSync()
+    }
+
+    /** The site no longer accepts this account's token: it's signed out. */
     private fun onLemmyTokenRejected() {
         store.expire(accountId)
     }
@@ -312,12 +337,13 @@ class AccountSession(
     fun signOut() {
         val name = account?.label
         (service as? LemmyService)?.let { lemmy -> scope.launch { runCatching { lemmy.logOut() } } }
+        (service as? BlueskyService)?.let { bluesky -> scope.launch { runCatching { bluesky.logOut() } } }
         if (store.multiProfile) {
             store.remove(accountId) // switches the UI away, which destroys this session
             WebProfiles.wipe(profile)
         } else {
             WebProfiles.wipe(null)
-            store.update(accountId) { it.copy(username = null, knownAs = null, communities = emptyList(), token = null) }
+            store.update(accountId) { it.copy(username = null, knownAs = null, communities = emptyList(), token = null, refreshToken = null) }
             service.forget()
             reset(feed(null))
         }

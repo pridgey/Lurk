@@ -223,6 +223,7 @@ fun DiscoverView(
                                     CommunityCard(
                                         info = community,
                                         peek = screen.peeks[community.name],
+                                    peekLabel = screen.peekLabel,
                                         activeLabel = activeLabel,
                                         joinStamp = if (i == 0) (state.x.value / threshold).coerceIn(0f, 1f) else 0f,
                                         skipStamp = if (i == 0) (-state.x.value / threshold).coerceIn(0f, 1f) else 0f,
@@ -406,7 +407,7 @@ private fun ResultRow(
                 }
             }
             val stats = buildList {
-                info.subscribers?.let { add("${compact(it)} members") }
+                info.subscribers?.let { add("${compact(it)} ${naming.memberNoun}") }
                 info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
             }
             if (stats.isNotEmpty()) {
@@ -431,6 +432,7 @@ private fun ResultRow(
 private fun CommunityCard(
     info: CommunityInfo,
     peek: Peek?,
+    peekLabel: String,
     activeLabel: String,
     joinStamp: Float,
     skipStamp: Float,
@@ -488,7 +490,7 @@ private fun CommunityCard(
                         Text(it, style = MaterialTheme.typography.titleSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     val stats = buildList {
-                        info.subscribers?.let { add("${compact(it)} members") }
+                        info.subscribers?.let { add("${compact(it)} ${naming.memberNoun}") }
                         info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
                     }
                     if (stats.isNotEmpty()) {
@@ -509,7 +511,7 @@ private fun CommunityCard(
                         )
                     }
                     Text(
-                        "Top this week",
+                        peekLabel,
                         style = MaterialTheme.typography.labelLarge,
                         color = muted,
                         modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
@@ -545,7 +547,7 @@ private fun CommunityIcon(info: CommunityInfo, size: Dp, modifier: Modifier = Mo
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.fillMaxSize().clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-            Avatar(info.name, size - 8.dp)
+            Avatar(LocalNaming.current.label(info.name), size - 8.dp)
             if (info.icon != null) {
                 AsyncImage(
                     model = info.icon,

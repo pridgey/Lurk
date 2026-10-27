@@ -85,13 +85,13 @@ fun SubredditSheet(
     val typed = naming.clean(query)
     val matches = remember(subreddits, typed) {
         if (typed.isEmpty()) subreddits
-        else subreddits.filter { it.contains(typed, ignoreCase = true) }
-            .sortedBy { !it.startsWith(typed, ignoreCase = true) } // prefix matches first
+        else subreddits.filter { naming.label(it).contains(typed, ignoreCase = true) }
+            .sortedBy { !naming.label(it).startsWith(typed, ignoreCase = true) } // prefix matches first
     }
     val canGoTo = naming.isCommunityName(typed) && matches.none { it.equals(typed, ignoreCase = true) }
     // The keyboard's Go: an exact match, else the typed name, else the best match.
     fun go() {
-        val target = matches.firstOrNull { it.equals(typed, ignoreCase = true) }
+        val target = matches.firstOrNull { it.equals(typed, ignoreCase = true) || naming.label(it).equals(typed, ignoreCase = true) }
             ?: typed.takeIf { canGoTo }
             ?: matches.firstOrNull()
             ?: return
@@ -162,17 +162,17 @@ fun SubredditSheet(
                 }
                 if (typed.isEmpty()) {
                     // A to Z with a letter header per group; numbers and the like under "#".
-                    matches.groupBy { it.first().uppercaseChar().takeIf(Char::isLetter) ?: '#' }
+                    matches.groupBy { naming.label(it).firstOrNull()?.uppercaseChar()?.takeIf(Char::isLetter) ?: '#' }
                         .toSortedMap(compareBy<Char> { if (it == '#') '{' else it })
                         .forEach { (letter, names) ->
                             stickyHeader(key = "h:$letter") { LetterHeader(letter) }
-                            items(names, key = { "s:" + it.lowercase() }) { name ->
-                                SubredditRow(name, name, selected == name.lowercase()) { pick { onSubreddit(name) } }
+                            items(names.sortedBy { naming.label(it).lowercase() }, key = { "s:" + it.lowercase() }) { name ->
+                                SubredditRow(naming.label(name), naming.label(name), selected == name.lowercase()) { pick { onSubreddit(name) } }
                             }
                         }
                 } else {
                     items(matches, key = { "s:" + it.lowercase() }) { name ->
-                        SubredditRow(name, name, selected == name.lowercase()) { pick { onSubreddit(name) } }
+                        SubredditRow(naming.label(name), naming.label(name), selected == name.lowercase()) { pick { onSubreddit(name) } }
                     }
                 }
             }
