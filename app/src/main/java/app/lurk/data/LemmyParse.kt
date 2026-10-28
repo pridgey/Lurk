@@ -8,7 +8,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Turns Lemmy's API v3 JSON into the shared models. Names: posts are "p<id>" and
+ * Turns Lemmy's API v3 JSON (and PieFed's copy of it, which names a few fields
+ * differently) into the shared models. Names: posts are "p<id>" and
  * comments "c<id>", so votes and saves know which endpoint to use. People and
  * communities from other instances are "name@host"; local ones are just "name".
  * A post read from its community's home instance instead is "r<ap_id>", since its
@@ -31,7 +32,7 @@ object LemmyParse {
         return Post(
             name = if (remote) "r$id" else "p$id",
             id = id,
-            title = p.optString("name"),
+            title = p.str("name") ?: p.optString("title"), // PieFed: "title"
             author = person(pv.optJSONObject("creator"), self),
             community = community?.let { community(it, self) },
             score = counts?.optInt("score") ?: 0,
@@ -49,7 +50,8 @@ object LemmyParse {
             flair = null,
             over18 = p.optBoolean("nsfw") || community?.optBoolean("nsfw") == true,
             spoiler = false,
-            stickied = p.optBoolean("featured_community") || p.optBoolean("featured_local"),
+            stickied = p.optBoolean("featured_community") || p.optBoolean("featured_local") ||
+                p.optBoolean("sticky") || p.optBoolean("instance_sticky"), // PieFed's names
             locked = p.optBoolean("locked"),
             media = media,
             thumbnail = if (media == null && url != null) p.str("thumbnail_url") else null,
@@ -65,7 +67,7 @@ object LemmyParse {
         val details = pv.optJSONObject("image_details")
         val width = details?.optInt("width") ?: 0
         val height = details?.optInt("height") ?: 0
-        if (type.startsWith("image/") || Links.isImageFile(uri)) {
+        if (type.startsWith("image/") || p.optString("post_type") == "Image" || Links.isImageFile(uri)) {
             // The instance's own smaller copy for lists; the original for the viewer.
             val small = details?.str("link") ?: thumb ?: url
             return PostMedia.Image(Picture(small, url, width, height))
@@ -92,7 +94,7 @@ object LemmyParse {
         val body = when {
             c.optBoolean("removed") -> "*[removed]*"
             c.optBoolean("deleted") -> "*[deleted]*"
-            else -> c.optString("content")
+            else -> c.str("content") ?: c.optString("body") // PieFed: "body"
         }
         val html = Markdown.toHtml(body)
         return Comment(
@@ -188,7 +190,7 @@ object LemmyParse {
 
     /** [self]: when [o] came from another instance, this one's host; "local" then means local to that one. */
     private fun qualified(o: JSONObject, self: String? = null): String {
-        val name = o.optString("name")
+        val name = o.str("name") ?: o.optString("user_name") // PieFed people: "user_name"
         if (self == null && o.optBoolean("local", true)) return name
         val host = o.str("actor_id")?.let { Uri.parse(it).host } ?: return name
         return if (host.equals(self, ignoreCase = true)) name else "$name@$host"

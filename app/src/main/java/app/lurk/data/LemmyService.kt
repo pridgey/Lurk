@@ -60,8 +60,9 @@ class NeedsTwoFactor : Exception("Enter the code from your authenticator app")
 
 /**
  * A Lemmy instance, through its open JSON API (v3, which Lemmy 0.19 serves and 1.0
- * still accepts). Signed-in requests carry the login token the instance issued;
- * without one, the instance's public posts can still be read.
+ * still accepts). PieFed instances work too, through their copy of that API. Signed-in
+ * requests carry the login token the instance issued; without one, the instance's
+ * public posts can still be read.
  */
 class LemmyService(
     val instance: String,
@@ -76,7 +77,8 @@ class LemmyService(
     override val kind = ServiceKind.Lemmy
     override val naming = LemmyNaming(instance)
     override val links = LemmyLinks(instance)
-    override val feedSorts = LemmySorts.feed
+    override val feedSorts: List<Sort>
+        get() = if (pieFed) LemmySorts.feed.filter { it.key !in PIEFED_NO_FEED_SORT } else LemmySorts.feed
     override val commentSorts = LemmySorts.comments
     override val fixedFeeds = listOf(FixedFeed(LOCAL, "Local"), FixedFeed(ALL, "All"))
     override val signIn = SignIn.Form
@@ -84,6 +86,9 @@ class LemmyService(
     /** Instances can turn downvotes off; learned from the site info at sync. */
     override var downvotes by mutableStateOf(true)
         private set
+
+    /** The instance runs PieFed, which lacks a few of Lemmy's sorts; learned at sync. */
+    private var pieFed by mutableStateOf(false)
 
     private val client = LemmyClient(instance, log) { token }
 
@@ -95,6 +100,7 @@ class LemmyService(
 
     override suspend fun whoAmI(): String? {
         authNote = null
+        pieFed = client.api() == LemmyApi.PieFed
         val site = try {
             client.get("/site")
         } catch (e: LemmyError) {
@@ -102,7 +108,8 @@ class LemmyService(
             rejectToken()
             client.get("/site")
         }
-        site.optJSONObject("site_view")?.optJSONObject("local_site")?.let {
+        // PieFed keeps the setting on "site".
+        (site.optJSONObject("site_view")?.optJSONObject("local_site") ?: site.optJSONObject("site"))?.let {
             downvotes = it.optBoolean("enable_downvotes", true)
         }
         val me = site.optJSONObject("my_user")
@@ -165,7 +172,7 @@ class LemmyService(
         val host = community.substringAfter('@')
         val home = homeClients.getOrPut(host.lowercase()) { LemmyClient(host, log) { null } }
         val params = linkedMapOf(
-            "sort" to (sort ?: feedSorts.first()).key,
+            "sort" to feedSort(sort, home.api()),
             "limit" to PAGE_SIZE.toString(),
             "community_name" to community.substringBefore('@'),
         )
@@ -176,6 +183,12 @@ class LemmyService(
     }
 
     private val homeClients = ConcurrentHashMap<String, LemmyClient>()
+
+    /** [sort]'s key, or Hot where PieFed doesn't have it (picked before it was known to be PieFed). */
+    private fun feedSort(sort: Sort?, api: LemmyApi): String {
+        val key = (sort ?: LemmySorts.feed.first()).key
+        return if (api == LemmyApi.PieFed && key in PIEFED_NO_FEED_SORT) "Hot" else key
+    }
 
     /** Sets [params]' page from [cursor]; returns the page number when paging by number. */
     private fun paging(params: MutableMap<String, String>, cursor: String?): Int? {
@@ -199,7 +212,7 @@ class LemmyService(
 
     private suspend fun localFeed(community: String?, sort: Sort?, cursor: String?): FeedPage {
         val params = linkedMapOf(
-            "sort" to (sort ?: feedSorts.first()).key,
+            "sort" to feedSort(sort, client.api()),
             "limit" to PAGE_SIZE.toString(),
         )
         when (community) {
@@ -303,11 +316,12 @@ class LemmyService(
     /** Every community the instance knows; pages by number. */
     override suspend fun discover(sort: Sort?, cursor: String?): CommunityPage {
         val page = cursor?.toIntOrNull() ?: 1
+        val key = (sort ?: discoverSorts.first()).key
         val root = client.get(
             "/community/list",
             mapOf(
                 "type_" to "All",
-                "sort" to (sort ?: discoverSorts.first()).key,
+                "sort" to if (client.api() == LemmyApi.PieFed) PIEFED_DISCOVER_SORT[key] ?: key else key,
                 "limit" to DISCOVER_PAGE.toString(),
                 "page" to page.toString(),
             ),
@@ -515,6 +529,10 @@ class LemmyService(
         private const val DISCOVER_PAGE = 50
         private const val SEARCH_PAGE = 30
         private const val MAX_DEPTH = "8"
+        /** Lemmy post sorts PieFed doesn't offer. */
+        private val PIEFED_NO_FEED_SORT = setOf("MostComments", "Controversial")
+        /** PieFed's nearest community sorts to [discoverSorts]. */
+        private val PIEFED_DISCOVER_SORT = mapOf("TopMonth" to "Active", "TopWeek" to "Hot", "TopAll" to "TopSubscribers")
 
         /** "https://Lemmy.World/c/x" or "lemmy.world" to "lemmy.world". */
         fun normalizeInstance(input: String): String =
@@ -525,6 +543,7 @@ class LemmyService(
         suspend fun login(instance: String, username: String, password: String, totp: String?): String {
             val client = LemmyClient(instance, DebugLog()) { null }
             val body = JSONObject().put("username_or_email", username.trim()).put("password", password)
+            if (client.api() == LemmyApi.PieFed) body.put("username", username.trim())
             if (!totp.isNullOrBlank()) body.put("totp_2fa_token", totp.trim())
             val result = try {
                 client.send("POST", "/user/login", body)
@@ -552,12 +571,51 @@ class LemmyError(val status: Int, val code: String?, message: String) : ServiceE
         get() = status == 401 || code in setOf("not_logged_in", "incorrect_login", "invalid_auth_token")
 }
 
-/** JSON requests to one instance's /api/v3. */
+/** Where an instance serves the Lemmy API: Lemmy itself, or PieFed's copy of it. */
+enum class LemmyApi(val path: String) { Lemmy("/api/v3"), PieFed("/api/alpha") }
+
+/** JSON requests to one instance's API: /api/v3, or /api/alpha on PieFed. */
 class LemmyClient(
     private val instance: String,
     private val log: DebugLog,
     private val token: () -> String?,
 ) {
+    /** Which API the instance serves, from its nodeinfo; asked once per host. */
+    suspend fun api(): LemmyApi {
+        val key = instance.lowercase()
+        apis[key]?.let { return it }
+        val software = withContext(Dispatchers.IO) { software() }
+        val api = if (software == "piefed") LemmyApi.PieFed else LemmyApi.Lemmy
+        // Unreachable: guess Lemmy for now and ask again next time.
+        if (software != null) apis[key] = api
+        if (api == LemmyApi.PieFed) log.note("$instance runs PieFed")
+        return api
+    }
+
+    /** The software nodeinfo names, lowercase; "" when it names none; null when unreachable. */
+    private fun software(): String? {
+        val links = fetch("https://$instance/.well-known/nodeinfo") ?: return null
+        val list = links.optJSONArray("links") ?: return ""
+        val href = (list.length() - 1 downTo 0).firstNotNullOfOrNull { i ->
+            list.optJSONObject(i)?.optString("href")?.takeIf { it.startsWith("https://") }
+        } ?: return ""
+        val info = fetch(href) ?: return null
+        return info.optJSONObject("software")?.optString("name")?.lowercase().orEmpty()
+    }
+
+    /** A JSON document; {} when the reply isn't JSON; null when the host can't be reached. */
+    private fun fetch(url: String): JSONObject? = try {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = PROBE_MS
+        conn.readTimeout = PROBE_MS
+        conn.setRequestProperty("Accept", "application/json")
+        conn.setRequestProperty("User-Agent", "Lurk (Android)")
+        val text = if (conn.responseCode in 200..299) conn.inputStream.bufferedReader().use { it.readText() } else ""
+        runCatching { JSONObject(text) }.getOrDefault(JSONObject())
+    } catch (e: IOException) {
+        null
+    }
+
     suspend fun get(path: String, params: Map<String, String> = emptyMap()): JSONObject {
         val query = params.entries.joinToString("&") { (k, v) -> enc(k) + "=" + enc(v) }
         return request("GET", path + if (query.isEmpty()) "" else "?$query", null)
@@ -566,10 +624,11 @@ class LemmyClient(
     suspend fun send(method: String, path: String, body: JSONObject): JSONObject = request(method, path, body)
 
     private suspend fun request(method: String, pathAndQuery: String, body: JSONObject?): JSONObject {
+        val api = api()
         log.note("$method $instance${pathAndQuery.substringBefore('?')}")
         val (status, text) = withContext(Dispatchers.IO) {
             try {
-                val conn = URL("https://$instance/api/v3$pathAndQuery").openConnection() as HttpURLConnection
+                val conn = URL("https://$instance${api.path}$pathAndQuery").openConnection() as HttpURLConnection
                 conn.requestMethod = method
                 conn.connectTimeout = TIMEOUT_MS
                 conn.readTimeout = TIMEOUT_MS
@@ -594,6 +653,7 @@ class LemmyClient(
         if (status == 200 && json != null) return json
 
         val code = json?.optString("error")?.takeIf { it.isNotBlank() }
+            ?: json?.let { pieFedCode(it) }.takeIf { api == LemmyApi.PieFed }
         val message = when {
             status == 0 -> "Couldn't reach $instance. Check your connection."
             json == null && status == 200 -> "$instance sent something that isn't Lemmy data."
@@ -607,9 +667,19 @@ class LemmyClient(
         throw LemmyError(status, code, message)
     }
 
+    /** PieFed's {"code":400,"message":"incorrect_login"}, as Lemmy's error codes. */
+    private fun pieFedCode(json: JSONObject): String? {
+        val message = json.optString("message").takeIf { it.isNotBlank() } ?: return null
+        return if ("unknown community" in message) "couldnt_find_community" else message
+    }
+
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     private companion object {
         const val TIMEOUT_MS = 20_000
+        /** Shorter for nodeinfo, which an unreachable host is asked again on each request. */
+        const val PROBE_MS = 8_000
+        /** By lowercase host, for every client in the app. */
+        val apis = ConcurrentHashMap<String, LemmyApi>()
     }
 }

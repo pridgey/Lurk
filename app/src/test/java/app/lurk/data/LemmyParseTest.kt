@@ -199,4 +199,37 @@ class LemmyParseTest {
         assertEquals("snake_case stays, emphasis goes", Markdown.plain("snake_case stays, *emphasis* _goes_"))
         assertEquals("", Markdown.plain("![only an image](https://x/y.png)"))
     }
+    /** PieFed's copy of the API: "title", "body", "user_name" and "sticky" in place of Lemmy's names. */
+    @Test
+    fun pieFedPostAndComment() {
+        val pv = JSONObject(
+            """
+            {"post":{"id":9,"title":"From PieFed","body":"Hi","user_id":5,"community_id":2,"published":"2026-10-08T18:36:21.621535Z",
+                     "ap_id":"https://fedinsfw.app/post/9","nsfw":true,"locked":false,"sticky":true,"instance_sticky":false,
+                     "local":true,"post_type":"Image","url":"https://media.fedinsfw.app/a/b"},
+             "creator":{"id":5,"user_name":"bob","local":false,"actor_id":"https://l.tta.wtf/u/bob"},
+             "community":{"id":2,"name":"pics","local":true,"actor_id":"https://fedinsfw.app/c/pics","nsfw":true},
+             "counts":{"score":3,"comments":1},"my_vote":0,"saved":false}
+            """.trimIndent(),
+        )
+        val post = LemmyParse.post(pv)
+        assertEquals("From PieFed", post.title)
+        assertEquals("bob@l.tta.wtf", post.author)
+        assertTrue(post.stickied)
+        assertTrue(post.over18)
+        assertTrue(post.media is PostMedia.Image)
+
+        val cv = JSONObject(
+            """
+            {"comment":{"id":11,"post_id":9,"body":"A reply","path":"0.11","published":"2026-10-08T20:48:55.703482Z",
+                        "deleted":false,"removed":false,"distinguished":false},
+             "creator":{"id":6,"user_name":"carol","local":true,"actor_id":"https://fedinsfw.app/u/carol"},
+             "counts":{"score":2,"child_count":0},"my_vote":0}
+            """.trimIndent(),
+        )
+        val items = LemmyParse.tree(JSONArray().put(cv), post.name, post.name, 0, post.author)
+        val comment = items.single() as Comment
+        assertEquals("carol", comment.author)
+        assertTrue(comment.bodyHtml.contains("A reply"))
+    }
 }
