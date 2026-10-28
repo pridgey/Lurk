@@ -114,8 +114,7 @@ class LemmyService(
         }
         val me = site.optJSONObject("my_user")
         if (me == null && token != null) rejectToken()
-        val name = me?.optJSONObject("local_user_view")?.optJSONObject("person")?.optString("name")
-            ?.takeIf { it.isNotBlank() }
+        val name = LemmyParse.myName(me)
         val list = me?.optJSONArray("follows") ?: JSONArray()
         follows = (0 until list.length()).mapNotNull { i ->
             list.optJSONObject(i)?.optJSONObject("community")?.let(LemmyParse::community)

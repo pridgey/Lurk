@@ -186,6 +186,12 @@ object LemmyParse {
     /** A community's name: "name" if it's on this instance, else "name@host". */
     fun community(c: JSONObject, self: String? = null): String = qualified(c, self)
 
+    /** The signed-in user's name from /site's "my_user"; null when signed out. */
+    fun myName(me: JSONObject?): String? {
+        val p = me?.optJSONObject("local_user_view")?.optJSONObject("person") ?: return null
+        return p.str("name") ?: p.str("user_name") // PieFed: "user_name"
+    }
+
     fun person(p: JSONObject?, self: String? = null): String = p?.let { qualified(it, self) } ?: "[deleted]"
 
     /** [self]: when [o] came from another instance, this one's host; "local" then means local to that one. */

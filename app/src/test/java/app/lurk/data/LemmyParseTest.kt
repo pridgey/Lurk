@@ -232,4 +232,14 @@ class LemmyParseTest {
         assertEquals("carol", comment.author)
         assertTrue(comment.bodyHtml.contains("A reply"))
     }
+
+    /** PieFed names the signed-in user "user_name"; reading only "name" signed people out. */
+    @Test
+    fun myNameFromSite() {
+        val lemmy = JSONObject("""{"local_user_view":{"person":{"id":1,"name":"alice"}}}""")
+        val pieFed = JSONObject("""{"local_user_view":{"person":{"id":2,"user_name":"bliye"}}}""")
+        assertEquals("alice", LemmyParse.myName(lemmy))
+        assertEquals("bliye", LemmyParse.myName(pieFed))
+        assertEquals(null, LemmyParse.myName(null))
+    }
 }
