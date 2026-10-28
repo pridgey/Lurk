@@ -409,6 +409,7 @@ private fun ResultRow(
             val stats = buildList {
                 info.subscribers?.let { add("${compact(it)} ${naming.memberNoun}") }
                 info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
+                info.posts?.let { add("${compact(it)} ${if (it == 1) "post" else "posts"}") }
             }
             if (stats.isNotEmpty()) {
                 Text(stats.joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -492,6 +493,7 @@ private fun CommunityCard(
                     val stats = buildList {
                         info.subscribers?.let { add("${compact(it)} ${naming.memberNoun}") }
                         info.activeUsers?.takeIf { it > 0 }?.let { add("${compact(it)} $activeLabel") }
+                        info.posts?.let { add("${compact(it)} ${if (it == 1) "post" else "posts"}") }
                     }
                     if (stats.isNotEmpty()) {
                         Text(

@@ -164,6 +164,36 @@ class LemmyParseTest {
     }
 
     @Test
+    fun postFromItsHomeInstance() {
+        // As lemmy.ml's API sends it: its own community is local there; alice is from beehaw.org.
+        val post = LemmyParse.post(postView(communityLocal = true), self = "lemmy.world")
+        assertEquals("rhttps://lemmy.world/post/42", post.name)
+        assertEquals("https://lemmy.world/post/42", post.threadRef)
+        assertEquals("technology@lemmy.ml", post.community)
+        assertEquals("alice@beehaw.org", post.author)
+        assertNull(post.likes) // read signed out
+        assertFalse(post.saved)
+    }
+
+    @Test
+    fun homeInstancePostNamesThisInstanceLocally() {
+        val post = LemmyParse.post(postView(communityLocal = true), self = "lemmy.ml")
+        assertEquals("technology", post.community)
+    }
+
+    @Test
+    fun postCountOnlyForThisInstancesCommunities() {
+        fun info(local: Boolean) = LemmyParse.communityInfo(JSONObject(
+            """
+            {"community":{"id":3,"name":"linux","local":$local,"actor_id":"https://lemmy.ml/c/linux"},
+             "counts":{"subscribers":52000,"posts":0},"subscribed":"NotSubscribed"}
+            """.trimIndent(),
+        ))
+        assertEquals(0, info(local = true).posts)
+        assertNull(info(local = false).posts) // only what reached this instance
+    }
+
+    @Test
     fun plainTextFromMarkdown() {
         assertEquals("A list: one two", Markdown.plain("A list:\n\n- one\n* two\n\n---"))
         assertEquals("snake_case stays, emphasis goes", Markdown.plain("snake_case stays, *emphasis* _goes_"))

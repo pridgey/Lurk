@@ -11,30 +11,36 @@ import org.json.JSONObject
  * Turns Lemmy's API v3 JSON into the shared models. Names: posts are "p<id>" and
  * comments "c<id>", so votes and saves know which endpoint to use. People and
  * communities from other instances are "name@host"; local ones are just "name".
+ * A post read from its community's home instance instead is "r<ap_id>", since its
+ * ids there mean nothing here.
  */
 object LemmyParse {
 
-    fun post(pv: JSONObject): Post {
+    /** [self]: set when [pv] came from another instance's API, to this instance's host, for naming. */
+    fun post(pv: JSONObject, self: String? = null): Post {
         val p = pv.getJSONObject("post")
         val community = pv.optJSONObject("community")
         val counts = pv.optJSONObject("counts")
-        val id = p.getLong("id").toString()
+        val apId = p.str("ap_id")
+        val remote = self != null && apId != null
+        val id = if (remote) apId!! else p.getLong("id").toString()
         val url = p.str("url")
         val body = p.str("body").orEmpty()
         val html = body.takeIf { it.isNotBlank() }?.let(Markdown::toHtml)
         val media = url?.let { media(p, pv, it) }
         return Post(
-            name = "p$id",
+            name = if (remote) "r$id" else "p$id",
             id = id,
             title = p.optString("name"),
-            author = person(pv.optJSONObject("creator")),
-            community = community?.let(::community),
+            author = person(pv.optJSONObject("creator"), self),
+            community = community?.let { community(it, self) },
             score = counts?.optInt("score") ?: 0,
-            likes = myVote(pv),
-            saved = pv.optBoolean("saved"),
+            likes = if (remote) null else myVote(pv),
+            saved = !remote && pv.optBoolean("saved"),
             numComments = counts?.optInt("comments") ?: 0,
             createdUtc = time(p.str("published")),
-            threadRef = "post:$id",
+            // A home instance's post opens by its address, which this instance looks up.
+            threadRef = if (remote) id else "post:$id",
             url = url.orEmpty(),
             domain = url?.let { Uri.parse(it).host }.orEmpty(),
             isSelf = url == null,
@@ -170,19 +176,22 @@ object LemmyParse {
             banner = c.str("banner"),
             over18 = c.optBoolean("nsfw"),
             subscribed = cv.optString("subscribed") == "Subscribed",
+            // Only this instance's own communities: for others it counts just what reached it.
+            posts = counts?.optInt("posts", -1)?.takeIf { it >= 0 && c.optBoolean("local", true) },
         )
     }
 
     /** A community's name: "name" if it's on this instance, else "name@host". */
-    fun community(c: JSONObject): String = qualified(c)
+    fun community(c: JSONObject, self: String? = null): String = qualified(c, self)
 
-    fun person(p: JSONObject?): String = p?.let(::qualified) ?: "[deleted]"
+    fun person(p: JSONObject?, self: String? = null): String = p?.let { qualified(it, self) } ?: "[deleted]"
 
-    private fun qualified(o: JSONObject): String {
+    /** [self]: when [o] came from another instance, this one's host; "local" then means local to that one. */
+    private fun qualified(o: JSONObject, self: String? = null): String {
         val name = o.optString("name")
-        if (o.optBoolean("local", true)) return name
+        if (self == null && o.optBoolean("local", true)) return name
         val host = o.str("actor_id")?.let { Uri.parse(it).host } ?: return name
-        return "$name@$host"
+        return if (host.equals(self, ignoreCase = true)) name else "$name@$host"
     }
 
     private fun myVote(v: JSONObject): Boolean? = when (v.optInt("my_vote", 0)) {

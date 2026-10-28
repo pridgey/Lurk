@@ -8,6 +8,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -123,7 +125,77 @@ class LemmyService(
 
     override fun isMixed(community: String?): Boolean = community == null || community == LOCAL || community == ALL
 
+    /**
+     * A community from another instance only has the posts that reached this one, often
+     * none. When this instance's copy runs out on its first page, the community's home
+     * instance is asked instead, and its pages carry on from there.
+     */
     override suspend fun feed(community: String?, sort: Sort?, cursor: String?): FeedPage {
+        if (cursor != null && cursor.startsWith(HOME) && community != null) {
+            return homeFeed(community, sort, cursor.removePrefix(HOME))
+        }
+        val remote = cursor == null && community != null && '@' in community
+        val local = try {
+            localFeed(community, sort, cursor)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (!remote) throw e
+            return tryHome(community!!, sort) ?: throw e
+        }
+        if (!remote || local.after != null) return local
+        val home = tryHome(community!!, sort) ?: return local
+        return if (home.posts.size > local.posts.size) home else local
+    }
+
+    /** The home instance's first page, or null if it can't be read (it's down, or isn't Lemmy). */
+    private suspend fun tryHome(community: String, sort: Sort?): FeedPage? = try {
+        homeFeed(community, sort, null)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.note("  home instance unavailable: ${e.message}")
+        null
+    }
+
+    /** "linux@lemmy.ml" read from lemmy.ml itself, signed out: this instance's token stays here. */
+    private suspend fun homeFeed(community: String, sort: Sort?, cursor: String?): FeedPage {
+        val host = community.substringAfter('@')
+        val home = homeClients.getOrPut(host.lowercase()) { LemmyClient(host, log) { null } }
+        val params = linkedMapOf(
+            "sort" to (sort ?: feedSorts.first()).key,
+            "limit" to PAGE_SIZE.toString(),
+            "community_name" to community.substringBefore('@'),
+        )
+        val page = paging(params, cursor)
+        val root = home.get("/post/list", params)
+        val result = posts(root, page) { LemmyParse.post(it, self = instance) }
+        return FeedPage(result.posts, result.after?.let { HOME + it })
+    }
+
+    private val homeClients = ConcurrentHashMap<String, LemmyClient>()
+
+    /** Sets [params]' page from [cursor]; returns the page number when paging by number. */
+    private fun paging(params: MutableMap<String, String>, cursor: String?): Int? {
+        // Lemmy 0.19 pages by cursor; older instances by page number.
+        val page = cursor?.removePrefix("page:")?.takeIf { cursor.startsWith("page:") }?.toInt()
+        if (page != null) params["page"] = page.toString() else if (cursor != null) params["page_cursor"] = cursor
+        return page
+    }
+
+    private fun posts(root: JSONObject, page: Int?, parse: (JSONObject) -> Post): FeedPage {
+        val list = root.optJSONArray("posts") ?: JSONArray()
+        val posts = (0 until list.length()).map { parse(list.getJSONObject(it)) }
+        val next = when {
+            posts.isEmpty() -> null
+            root.has("next_page") -> root.optString("next_page").takeIf { !root.isNull("next_page") && it.isNotBlank() }
+            posts.size < PAGE_SIZE -> null
+            else -> "page:${(page ?: 1) + 1}"
+        }
+        return FeedPage(posts, next)
+    }
+
+    private suspend fun localFeed(community: String?, sort: Sort?, cursor: String?): FeedPage {
         val params = linkedMapOf(
             "sort" to (sort ?: feedSorts.first()).key,
             "limit" to PAGE_SIZE.toString(),
@@ -134,10 +206,7 @@ class LemmyService(
             ALL -> params["type_"] = "All"
             else -> params["community_name"] = community
         }
-        // Lemmy 0.19 pages by cursor; older instances by page number.
-        val page = cursor?.removePrefix("page:")?.takeIf { cursor.startsWith("page:") }?.toInt()
-        if (page != null) params["page"] = page.toString() else if (cursor != null) params["page_cursor"] = cursor
-
+        val page = paging(params, cursor)
         val root = try {
             client.get("/post/list", params)
         } catch (e: LemmyError) {
@@ -146,15 +215,7 @@ class LemmyService(
             client.get("/resolve_object", mapOf("q" to "!$community"))
             client.get("/post/list", params)
         }
-        val list = root.optJSONArray("posts") ?: JSONArray()
-        val posts = (0 until list.length()).map { LemmyParse.post(list.getJSONObject(it)) }
-        val next = when {
-            posts.isEmpty() -> null
-            root.has("next_page") -> root.optString("next_page").takeIf { !root.isNull("next_page") && it.isNotBlank() }
-            posts.size < PAGE_SIZE -> null
-            else -> "page:${(page ?: 1) + 1}"
-        }
-        return FeedPage(posts, next)
+        return posts(root, page) { LemmyParse.post(it) }
     }
 
     override suspend fun thread(ref: String, sort: Sort?): ThreadData {
@@ -303,10 +364,22 @@ class LemmyService(
         follows = null
     }
 
-    private fun split(name: String): Pair<String, Long> = when (name.first()) {
+    /** Post ids here for posts read from their home instance, by address. */
+    private val resolved = ConcurrentHashMap<String, Long>()
+
+    private suspend fun split(name: String): Pair<String, Long> = when (name.first()) {
+        'r' -> "post" to localPostId(name.drop(1))
         'p' -> "post" to name.drop(1).toLong()
         'c' -> "comment" to name.drop(1).toLong()
         else -> throw ServiceException("Can't do that here")
+    }
+
+    /** A home instance's post, by address, as this instance knows it, fetching it here if need be. */
+    private suspend fun localPostId(apId: String): Long {
+        resolved[apId]?.let { return it }
+        val found = client.get("/resolve_object", mapOf("q" to apId)).optJSONObject("post")
+            ?: throw ServiceException("$instance couldn't find that post.")
+        return found.getJSONObject("post").getLong("id").also { resolved[apId] = it }
     }
 
     private fun requireSignedIn() {
@@ -324,6 +397,8 @@ class LemmyService(
         /** Fixed feeds: this instance's communities, and everything it knows. */
         const val LOCAL = ":local"
         const val ALL = ":all"
+        /** Marks feed cursors for a community's home instance. */
+        private const val HOME = "home:"
         private const val PAGE_SIZE = 25
         private const val DISCOVER_PAGE = 50
         private const val SEARCH_PAGE = 30

@@ -157,6 +157,8 @@ data class CommunityInfo(
     val banner: String?,
     val over18: Boolean,
     val subscribed: Boolean,
+    /** Posts the site has (Lemmy: the ones that reached this instance), when it says. */
+    val posts: Int? = null,
 )
 
 /** [after]: the cursor for the next page, or null at the end. */
