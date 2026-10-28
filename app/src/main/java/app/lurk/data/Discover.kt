@@ -94,6 +94,12 @@ class DiscoverScreen(
     var sort by mutableStateOf(service.discoverSorts.firstOrNull())
         private set
 
+    /** Topics the deck can narrow to; empty where the site has none. */
+    val topics: List<Topic> = service.discoverTopics
+    /** The deck's topic; null deals from everything. */
+    var topic by mutableStateOf<Topic?>(null)
+        private set
+
     class Swipe(val community: CommunityInfo, val joined: Boolean)
 
     val webUrl: String get() = service.links.communities
@@ -156,6 +162,12 @@ class DiscoverScreen(
         refresh()
     }
 
+    /** Deals from [newTopic] alone, or from everything again when it's the one already picked. */
+    fun changeTopic(newTopic: Topic?) {
+        topic = if (newTopic == topic) null else newTopic
+        refresh()
+    }
+
     /** Deals a fresh deck, still leaving out what's been seen. */
     fun refresh() {
         generation++
@@ -190,13 +202,13 @@ class DiscoverScreen(
                 // A page can be all seen or followed already; read on a few pages before giving up for now.
                 var pages = 0
                 while (deck.size < LOW_WATER && (pages < MAX_PAGES_PER_TOP_UP || (deck.isEmpty() && pages < MAX_PAGES_WHEN_EMPTY))) {
-                    val page = service.discover(sort, after)
+                    val page = service.discover(sort, after, topic)
                     if (gen != generation) return@launch
                     after = page.after
                     pages++
                     val fresh = page.communities.filter {
                         dealt.add(it.name.lowercase()) && !it.subscribed && it.name !in seen &&
-                            !isSubscribed(it.name) && (it.subscribers ?: MIN_MEMBERS) >= MIN_MEMBERS && allowed(it)
+                            !isSubscribed(it.name) && (it.subscribers ?: MIN_MEMBERS) >= MIN_MEMBERS && it.posts != 0 && allowed(it)
                     }
                     deck.addAll(fresh.shuffled())
                     if (page.after == null) {

@@ -134,6 +134,12 @@ interface Service {
     /** A page of communities worth a look, for Discover. */
     suspend fun discover(sort: Sort?, cursor: String?): CommunityPage
 
+    /** Topics Discover can narrow its deck to; empty where the site can't. */
+    val discoverTopics: List<Topic> get() = emptyList()
+
+    /** [discover], narrowed to [topic] (one of [discoverTopics]) when it's set. */
+    suspend fun discover(sort: Sort?, cursor: String?, topic: Topic?): CommunityPage = discover(sort, cursor)
+
     /** Communities whose name or title matches [query], biggest first, for Discover's search. */
     suspend fun searchCommunities(query: String, cursor: String?): CommunityPage
 

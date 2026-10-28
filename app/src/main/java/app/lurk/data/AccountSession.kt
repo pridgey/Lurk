@@ -49,6 +49,7 @@ class AccountSession(
                 instance = a?.instance.orEmpty(),
                 token = a?.token,
                 onTokenRejected = { onLemmyTokenRejected() },
+                index = CommunityIndex.get(context),
             )
             ServiceKind.Bluesky -> BlueskyService(
                 context,

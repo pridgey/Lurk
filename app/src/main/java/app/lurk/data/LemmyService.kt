@@ -68,6 +68,8 @@ class LemmyService(
     /** The login token. Cleared when the instance rejects it. */
     @Volatile var token: String?,
     private val onTokenRejected: () -> Unit,
+    /** Every community across Lemmy, for Discover; without it, Discover reads this instance's list. */
+    private val index: CommunityIndex? = null,
 ) : Service {
 
     override val log = DebugLog()
@@ -315,8 +317,116 @@ class LemmyService(
         return CommunityPage(communities, if (list.length() < DISCOVER_PAGE) null else (page + 1).toString())
     }
 
-    /** Every community the instance knows whose name or title matches; TopAll ranks by members. */
+    override val discoverTopics: List<Topic> = if (index != null) Topics.all else emptyList()
+
+    /**
+     * From the community index when it's at hand: it covers communities this instance
+     * hasn't heard of, counts posts where they live, and knows topics. Otherwise this
+     * instance's list, which a deck that started there keeps reading.
+     */
+    override suspend fun discover(sort: Sort?, cursor: String?, topic: Topic?): CommunityPage {
+        if (index != null && (cursor == null || cursor.startsWith(INDEX))) {
+            val all = if (topic != null) index.await() else index.cached()
+            if (all != null) {
+                val key = (sort ?: discoverSorts.first()).key
+                val reachable = reachable()
+                val ordered = withContext(Dispatchers.Default) {
+                    val picked = all.filter { (topic == null || topic.key in it.topics) && reachable(it.host) }
+                    when (key) {
+                        "TopWeek" -> picked.sortedByDescending { it.activeWeek }
+                        "TopAll" -> picked.sortedByDescending { it.subscribers }
+                        "New" -> picked.sortedByDescending { it.published }
+                        else -> picked.sortedByDescending { it.activeMonth }
+                    }
+                }
+                return indexPage(ordered, cursor, DISCOVER_PAGE)
+            }
+            if (cursor != null) return CommunityPage(emptyList(), null)
+            if (topic != null) {
+                throw ServiceException(index.error?.let { "Topics need the community list from lemmyverse.net. $it." }
+                    ?: "Topics need the community list from lemmyverse.net, which didn't load.")
+            }
+        }
+        return discover(sort, cursor)
+    }
+
+    /** One page of [list], from the offset in [cursor]. */
+    private fun indexPage(list: List<IndexedCommunity>, cursor: String?, size: Int): CommunityPage {
+        val from = cursor?.removePrefix(INDEX)?.toIntOrNull() ?: 0
+        val page = list.drop(from).take(size).map(::fromIndex)
+        val next = (from + size).takeIf { it < list.size }?.let { INDEX + it }
+        return CommunityPage(page, next)
+    }
+
+    private fun fromIndex(c: IndexedCommunity) = CommunityInfo(
+        name = if (c.host.equals(instance, ignoreCase = true)) c.name else "${c.name}@${c.host}",
+        title = c.title,
+        description = c.description,
+        subscribers = c.subscribers,
+        activeUsers = c.activeWeek,
+        icon = c.icon,
+        banner = c.banner,
+        over18 = c.nsfw,
+        subscribed = false,
+        posts = c.posts,
+    )
+
+    /** Hosts this instance won't talk to, learned once: its block list, or everything off its allow list. */
+    @Volatile private var federation: Pair<Set<String>, Set<String>>? = null
+
+    private suspend fun reachable(): (String) -> Boolean {
+        val (allowed, blocked) = federation ?: try {
+            val lists = client.get("/federated_instances").optJSONObject("federated_instances")
+            fun hosts(key: String): Set<String> {
+                val list = lists?.optJSONArray(key) ?: return emptySet()
+                return (0 until list.length()).mapNotNullTo(HashSet()) { list.optJSONObject(it)?.optString("domain")?.lowercase() }
+            }
+            (hosts("allowed") to hosts("blocked")).also { federation = it }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptySet<String>() to emptySet<String>() // try again next time
+        }
+        val self = instance.lowercase()
+        return { host ->
+            host == self || (host !in blocked && (allowed.isEmpty() || host in allowed))
+        }
+    }
+
+    /**
+     * Searches the community index when it's at hand (names and titles first, then
+     * descriptions, biggest first), else this instance. Also this instance when the index
+     * has nothing, since it may know communities the index doesn't.
+     */
     override suspend fun searchCommunities(query: String, cursor: String?): CommunityPage {
+        if (index != null && (cursor == null || cursor.startsWith(INDEX))) {
+            val all = index.cached()
+            if (all != null) {
+                val terms = query.lowercase().split(' ').filter { it.isNotBlank() }
+                val reachable = reachable()
+                fun has(text: String) = terms.all { it in text }
+                val found = withContext(Dispatchers.Default) {
+                    val named = ArrayList<IndexedCommunity>()
+                    val described = ArrayList<IndexedCommunity>()
+                    for (c in all) {
+                        if (!reachable(c.host)) continue
+                        when {
+                            has((c.name + " " + c.title.orEmpty()).lowercase()) -> named.add(c)
+                            has(c.description.lowercase()) -> described.add(c)
+                        }
+                    }
+                    named.sortedByDescending { it.subscribers } + described.sortedByDescending { it.subscribers }
+                }
+                if (found.isNotEmpty() || cursor != null) return indexPage(found, cursor, SEARCH_PAGE)
+            } else if (cursor != null) {
+                return CommunityPage(emptyList(), null)
+            }
+        }
+        return searchInstance(query, cursor)
+    }
+
+    /** Every community the instance knows whose name or title matches; TopAll ranks by members. */
+    private suspend fun searchInstance(query: String, cursor: String?): CommunityPage {
         val page = cursor?.toIntOrNull() ?: 1
         val root = client.get(
             "/search",
@@ -399,6 +509,8 @@ class LemmyService(
         const val ALL = ":all"
         /** Marks feed cursors for a community's home instance. */
         private const val HOME = "home:"
+        /** Marks Discover cursors that read the community index. */
+        private const val INDEX = "idx:"
         private const val PAGE_SIZE = 25
         private const val DISCOVER_PAGE = 50
         private const val SEARCH_PAGE = 30

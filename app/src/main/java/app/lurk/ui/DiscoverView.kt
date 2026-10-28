@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
@@ -11,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -76,6 +78,7 @@ import app.lurk.data.DiscoverScreen
 import app.lurk.data.Peek
 import app.lurk.data.Post
 import app.lurk.data.PostMedia
+import app.lurk.data.Topic
 import coil.compose.AsyncImage
 import kotlin.math.abs
 import kotlinx.coroutines.launch
@@ -162,6 +165,7 @@ fun DiscoverView(
             if (screen.isSearching) {
                 SearchResults(screen, signedIn, activeLabel, onOpen, onMessage, Modifier.weight(1f))
             } else {
+                if (screen.topics.isNotEmpty()) TopicChips(screen.topics, screen.topic, screen::changeTopic)
                 Text(
                     when {
                         screen.joined + screen.skipped > 0 -> "${screen.joined} joined · ${screen.skipped} skipped"
@@ -310,6 +314,31 @@ private fun SearchField(
         colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
     )
+}
+
+/** A row of topics to narrow the deck to; tapping the picked one again shows everything. */
+@Composable
+private fun TopicChips(topics: List<Topic>, picked: Topic?, onPick: (Topic) -> Unit) {
+    val row = rememberLazyListState()
+    // Keep the picked topic in view, as when coming back to Discover.
+    LaunchedEffect(Unit) {
+        val at = topics.indexOf(picked)
+        if (at > 0) row.scrollToItem(at)
+    }
+    LazyRow(
+        state = row,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+    ) {
+        items(topics, key = { it.key }) { topic ->
+            FilterChip(
+                selected = topic == picked,
+                onClick = { onPick(topic) },
+                label = { Text(topic.label) },
+            )
+        }
+    }
 }
 
 /** Communities matching the search, biggest first; loads more as you scroll. */
