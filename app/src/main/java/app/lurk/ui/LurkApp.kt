@@ -102,6 +102,7 @@ import app.lurk.data.AccountStore
 import app.lurk.data.DebugLog
 import app.lurk.data.DiscoverScreen
 import app.lurk.data.FeedScreen
+import app.lurk.data.GamesScreen
 import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
 import app.lurk.data.RssProbe
@@ -269,6 +270,7 @@ private fun AccountContent(
         is FeedScreen -> screen.webUrl
         is ThreadScreen -> screen.webUrl
         is DiscoverScreen -> screen.webUrl
+        is GamesScreen -> screen.webUrl
         is WebScreen -> browser.url
     }
     val webBack = screen is WebScreen && browser.canGoBack
@@ -296,6 +298,7 @@ private fun AccountContent(
             ?: screen.label
         is ThreadScreen -> screen.post?.let { post -> post.community?.let(::shortCommunity) } ?: "Comments"
         is DiscoverScreen -> "Discover"
+        is GamesScreen -> shortCommunity(screen.community) + " scores"
         is WebScreen -> links.locate(browser.url).label
     }.let { if (inChrome) "Reddit" else it }
     val titleCommunity = when (screen) {
@@ -304,6 +307,7 @@ private fun AccountContent(
         }
         is ThreadScreen -> screen.post?.community
         is DiscoverScreen -> null
+        is GamesScreen -> screen.community
         is WebScreen -> null
     }?.takeIf { !inChrome }
 
@@ -311,6 +315,7 @@ private fun AccountContent(
         is FeedScreen -> if (screen.community == null) HOME_KEY else screen.community.lowercase()
         is ThreadScreen -> screen.post?.community?.lowercase()
         is DiscoverScreen -> DISCOVER_KEY
+        is GamesScreen -> screen.community.lowercase()
         is WebScreen -> links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.community }
     }
     // Tapping the title on a post (or a community's web page) opens that community's feed.
@@ -318,6 +323,8 @@ private fun AccountContent(
         is FeedScreen -> null
         is ThreadScreen -> screen.post?.community
         is DiscoverScreen -> null
+        // Tapping the title goes to the community's posts.
+        is GamesScreen -> screen.community
         is WebScreen -> links.locate(browser.url).community
     }?.takeIf { !inChrome }
 
@@ -472,7 +479,7 @@ private fun AccountContent(
                         is DiscoverScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.discoverSorts, { it.label }) { screen.changeSort(it) }
                         }
-                        is WebScreen -> Unit
+                        is GamesScreen, is WebScreen -> Unit
                     }
                     AccountButton(
                         current = account,
@@ -486,12 +493,16 @@ private fun AccountContent(
                                 is FeedScreen -> screen.refresh()
                                 is ThreadScreen -> screen.load()
                                 is DiscoverScreen -> screen.refresh()
+                                is GamesScreen -> screen.load(refresh = true)
                                 is WebScreen -> browser.reload()
                             }
                         },
                         onSync = { session.requestSync() },
                         onInbox = links.inbox?.let { inbox -> { session.openWeb(inbox) } },
                         onViewOnWeb = if (screen is WebScreen) null else ({ currentUrl?.let(session::openWeb) }),
+                        onScores = (screen as? FeedScreen)?.community
+                            ?.takeIf { !inChrome && session.canShowGames(it) }
+                            ?.let { community -> { session.push(session.games(community)) } },
                         onOpenOutside = { currentUrl?.let { openExternal(context, Uri.parse(it)) } },
                         onDebug = { debugOpen = true },
                         update = updater?.state,
@@ -539,11 +550,19 @@ private fun AccountContent(
                 )
             } else key(screen) {
                 when (screen) {
-                    is FeedScreen -> FeedView(
-                        screen, session.actions, handlers,
-                        onViewOnWeb = { session.openWeb(screen.webUrl) },
-                        header = if (!session.isRss) null else ({ RssFeedHeader(screen) }),
-                    )
+                    is FeedScreen -> {
+                        val scores = screen.community?.takeIf { session.canShowGames(it) }
+                        FeedView(
+                            screen, session.actions, handlers,
+                            onViewOnWeb = { session.openWeb(screen.webUrl) },
+                            header = if (!session.isRss && scores == null) null else ({
+                                Column {
+                                    if (session.isRss) RssFeedHeader(screen)
+                                    if (scores != null) ScoreboardBanner(screen) { session.push(session.games(scores)) }
+                                }
+                            }),
+                        )
+                    }
                     is ThreadScreen -> ThreadView(screen, session.actions, handlers, onMessage)
                     is DiscoverScreen -> DiscoverView(
                         screen,
@@ -552,6 +571,7 @@ private fun AccountContent(
                         onOpen = { name -> session.push(session.feed(name)) },
                         onMessage = onMessage,
                     )
+                    is GamesScreen -> GamesView(screen, handlers)
                     is WebScreen -> WebPage(screen, browser)
                 }
             }
@@ -856,6 +876,8 @@ private fun OverflowMenu(
     onInbox: (() -> Unit)?,
     /** Null when already on the web. */
     onViewOnWeb: (() -> Unit)?,
+    /** Opens the community's scoreboard; null where there isn't one. */
+    onScores: (() -> Unit)?,
     onOpenOutside: () -> Unit,
     onDebug: () -> Unit,
     update: UpdateState?,
@@ -890,6 +912,9 @@ private fun OverflowMenu(
                 HorizontalDivider()
             }
             DropdownMenuItem(text = { Text("Refresh page") }, onClick = { open = false; onRefresh() })
+            if (onScores != null) {
+                DropdownMenuItem(text = { Text("Scoreboard") }, onClick = { open = false; onScores() })
+            }
             DropdownMenuItem(
                 text = { Text(if (syncing) "Syncing subscriptions…" else "Sync subscriptions") },
                 enabled = !syncing,

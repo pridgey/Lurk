@@ -231,6 +231,74 @@ class ThreadScreen(
     }
 }
 
+/**
+ * A community's game threads as a scoreboard: each game with its result and links to its
+ * game and post-game threads, a day at a time.
+ */
+class GamesScreen(
+    val community: String,
+    private val service: Service,
+    private val scope: CoroutineScope,
+) : Screen {
+    var days by mutableStateOf<List<GameDay>>(emptyList())
+        private set
+    /** The day shown; null shows the newest. */
+    var selected by mutableStateOf<java.time.LocalDate?>(null)
+    var loading by mutableStateOf(false)
+        private set
+    var error by mutableStateOf<String?>(null)
+        private set
+    /** Whether a load has finished, so "no games" isn't shown before the first one. */
+    var loaded by mutableStateOf(false)
+        private set
+    var fetchedAt by mutableStateOf<Long?>(null)
+        private set
+    var notice by mutableStateOf<String?>(null)
+        private set
+    val listState = LazyListState()
+
+    private var job: Job? = null
+    private var generation = 0
+
+    val webUrl: String get() = service.links.feed(community, null)
+
+    /** What a slow load is waiting on, e.g. Reddit's RSS rate limit. */
+    val loadingNote: String? get() = service.loadingNote
+
+    val day: GameDay? get() = days.firstOrNull { it.date == selected } ?: days.firstOrNull()
+
+    /** [refresh]: asked for by the user, so a service that keeps pages (RSS) fetches again. */
+    fun load(refresh: Boolean = false) {
+        generation++
+        val gen = generation
+        job?.cancel()
+        loading = true
+        error = null
+        job = scope.launch {
+            try {
+                val page = service.gameThreads(community, refresh)
+                if (gen != generation) return@launch
+                days = GameThreads.board(page.posts)
+                fetchedAt = page.fetchedAt
+                notice = page.notice
+                loaded = true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (gen == generation) error = e.message ?: "Something went wrong"
+            } finally {
+                if (gen == generation) loading = false
+            }
+        }
+    }
+
+    fun cancel() {
+        generation++
+        job?.cancel()
+        loading = false
+    }
+}
+
 /** A page shown in the visible WebView: sign-in, inbox, user pages, anything without a native screen. */
 class WebScreen(var url: String) : Screen
 

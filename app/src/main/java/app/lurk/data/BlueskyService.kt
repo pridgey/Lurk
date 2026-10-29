@@ -89,6 +89,8 @@ class BlueskyService(
     override val discoverSorts = emptyList<Sort>()
     override val peekSort: Sort? = null
     override val peekLabel = "Latest posts"
+    /** Posts have no titles to find game threads by. */
+    override val findsGames = false
 
     override var authNote: String? = null
         private set

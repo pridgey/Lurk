@@ -51,6 +51,15 @@ object LurkIcons {
         "M2.06 12.35a1 1 0 0 1 0-0.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 0.7 10.75 10.75 0 0 1-19.88 0",
         "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z",
     )
+    /** A scoreboard: two panels, a score in each. */
+    val Scores = icon(
+        "Scores",
+        "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z",
+        "M12 5v14",
+        "M7 9v6",
+        "M17 9v6",
+    )
+    val Chevron = icon("Chevron", "M9 6l6 6-6 6")
     val Pause = icon("Pause", "M7 5h3v14H7z", "M14 5h3v14h-3z", filled = true)
 
     private fun icon(name: String, vararg paths: String, filled: Boolean = false): ImageVector {

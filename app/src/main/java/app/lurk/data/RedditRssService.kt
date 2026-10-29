@@ -69,6 +69,15 @@ class RedditRssService(
     /** Whether [community]'s saved posts are old enough to fetch again when coming back to the app. */
     fun isStale(community: String?) = rss.isStale(community)
 
+    /** Reddit's search feed, by title: one request (a subreddit-feed turn) for the last week's threads. */
+    override suspend fun gameThreads(community: String, refresh: Boolean): FeedPage =
+        try {
+            rss.search(community, GameThreads.SEARCH, refresh)
+        } catch (e: FeedLinkRejected) {
+            onLinkRejected()
+            throw e
+        }
+
     override suspend fun thread(ref: String, sort: Sort?): ThreadData = throw ServiceException(NO_COMMENTS)
     override suspend fun moreChildren(post: Post, more: More, sort: Sort?): List<ThreadItem> = emptyList()
     override fun continueRef(post: Post?, threadRef: String, more: More): String = threadRef

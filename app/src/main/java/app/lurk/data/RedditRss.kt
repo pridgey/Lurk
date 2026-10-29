@@ -110,6 +110,23 @@ class RedditRss(context: Context, accountId: String, private val build: Int, pri
         return if (community == null) front(link, cursor, saved) else subreddit(link, community, key, cursor, saved, force)
     }
 
+    /**
+     * [community]'s search feed for [query] (newest first, the last week), kept like a
+     * first page. It counts against the same one-a-minute limit as subreddit feeds.
+     */
+    suspend fun search(community: String, query: String, force: Boolean): FeedPage {
+        val link = link ?: throw ServiceException("Add your front page feed link first")
+        val key = "g_" + key(community)
+        val saved = saved(key)
+        val age = saved?.let { System.currentTimeMillis() - it.fetchedAt }
+        if (saved != null && age!! < (if (force) MIN_PULL_MS else FRESH_MS)) return fromXml(saved, null)
+        return subreddit(
+            link, community, key, null, saved, force,
+            path = "/search.rss",
+            query = "q=${Uri.encode(query)}&restrict_sr=on&sort=new&t=week&",
+        )
+    }
+
     private suspend fun front(link: String, cursor: String?, saved: Cached?): FeedPage {
         val wait = frontBackoffUntil - SystemClock.elapsedRealtime()
         if (wait > 0) return savedOr(saved, "Reddit asked Lurk to slow down. Try again in ${minutes(wait)}.")
@@ -135,15 +152,24 @@ class RedditRss(context: Context, accountId: String, private val build: Int, pri
         }
     }
 
-    private suspend fun subreddit(link: String, community: String, key: String, cursor: String?, saved: Cached?, force: Boolean): FeedPage {
+    private suspend fun subreddit(
+        link: String,
+        community: String,
+        key: String,
+        cursor: String?,
+        saved: Cached?,
+        force: Boolean,
+        path: String = "/.rss",
+        query: String = "",
+    ): FeedPage {
         // Waiting on the limit with a saved copy to hand: show that, unless this is a pull.
         val wait = publicReadyAt - SystemClock.elapsedRealtime()
         if (saved != null && !force && wait > SHOW_SAVED_AFTER_MS) {
             return fromXml(saved, "Saved ${ago(saved.fetchedAt)}. Reddit allows one subreddit feed a minute; pull for new posts after that.")
         }
         val credentials = link.substringAfter('?')
-        fun url(auth: Boolean) = "https://www.reddit.com/r/${Uri.encode(community, "+")}/.rss?" +
-            (if (auth) "$credentials&" else "") + "limit=$PAGE" + (cursor?.let { "&after=$it" } ?: "")
+        fun url(auth: Boolean) = "https://www.reddit.com/r/${Uri.encode(community, "+")}$path?" +
+            (if (auth) "$credentials&" else "") + query + "limit=$PAGE" + (cursor?.let { "&after=$it" } ?: "")
 
         var auth = subredditAuth != false
         repeat(3) {

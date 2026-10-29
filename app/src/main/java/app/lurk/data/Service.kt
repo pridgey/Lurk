@@ -155,6 +155,32 @@ interface Service {
      */
     suspend fun setSubscribed(community: String, subscribed: Boolean)
 
+    /** Whether posts have titles, so a community's game threads can be found by them. */
+    val findsGames: Boolean get() = true
+
+    /**
+     * Recent game and post-game threads in [community] (a week or so), for its scoreboard
+     * ([GameThreads]). Other posts may come too; the board ignores them. By default this
+     * reads the community's newest posts; sites that can search titles do that instead.
+     */
+    suspend fun gameThreads(community: String, refresh: Boolean): FeedPage {
+        val newest = feedSorts.firstOrNull { it.key.equals("new", ignoreCase = true) }
+        val since = System.currentTimeMillis() / 1000 - GAME_WINDOW_SECONDS
+        val found = ArrayList<Post>()
+        var cursor: String? = null
+        var first: FeedPage? = null
+        repeat(GAME_PAGES) {
+            val page = feed(community, newest, cursor, refresh && cursor == null)
+            if (first == null) first = page
+            found += page.posts.filter { GameThreads.isGameThread(it.title) }
+            cursor = page.after
+            if (cursor == null || page.posts.isEmpty() || page.posts.minOf { it.createdUtc } < since) {
+                return FeedPage(found, null, first?.fetchedAt, first?.notice)
+            }
+        }
+        return FeedPage(found, null, first?.fetchedAt, first?.notice)
+    }
+
     /** Drops anything cached for the signed-in user, after they change. */
     fun forget() {}
 
@@ -162,3 +188,7 @@ interface Service {
 }
 
 open class ServiceException(message: String) : Exception(message)
+
+/** How far back [Service.gameThreads] looks, and how many pages of posts it reads at most. */
+private const val GAME_WINDOW_SECONDS = 7 * 24 * 3600L
+private const val GAME_PAGES = 4

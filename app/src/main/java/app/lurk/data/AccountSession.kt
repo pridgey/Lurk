@@ -199,6 +199,13 @@ class AccountSession(
     fun thread(ref: String, preview: Post? = null): ThreadScreen =
         ThreadScreen(ref, preview, service, scope).also { it.load() }
 
+    /** [community]'s game threads, as a scoreboard. */
+    fun games(community: String): GamesScreen = GamesScreen(community, service, scope).also { it.load() }
+
+    /** Whether [community] can have a scoreboard: a single community, on a site with post titles. */
+    fun canShowGames(community: String?): Boolean =
+        community != null && service.findsGames && !service.isMixed(community)
+
     private var discoverScreen: DiscoverScreen? = null
 
     /** The Discover deck. One per session, so leaving and coming back keeps your place. */
@@ -260,6 +267,7 @@ class AccountSession(
     /** A feed that's gone stops loading, so it doesn't spend a rate-limited request nobody will see. */
     private fun close(screen: Screen) {
         (screen as? FeedScreen)?.cancel()
+        (screen as? GamesScreen)?.cancel()
     }
 
     fun openWeb(url: String) {

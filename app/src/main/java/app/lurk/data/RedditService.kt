@@ -212,6 +212,17 @@ class RedditService(context: Context, profile: String?, scripts: Scripts) : Serv
 
     override val peekSort = RedditSorts.feed.first { it.key == "top:week" }
 
+    /** Reddit's search, by title: the last week's game and post-game threads in one request. */
+    override suspend fun gameThreads(community: String, refresh: Boolean): FeedPage {
+        val found = RedditParse.feed(
+            getObject(
+                "/r/${Uri.encode(community)}/search.json?raw_json=1&restrict_sr=on&sort=new&t=week&limit=100&q=" +
+                    Uri.encode(GameThreads.SEARCH),
+            ),
+        )
+        return FeedPage(found.posts, null)
+    }
+
     override suspend fun setSubscribed(community: String, subscribed: Boolean) =
         post("/api/subscribe", mapOf("action" to if (subscribed) "sub" else "unsub", "sr_name" to community))
 
