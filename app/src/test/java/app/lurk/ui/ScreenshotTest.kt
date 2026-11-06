@@ -218,6 +218,21 @@ class ScreenshotTest {
         syncProblem = "Reddit is rate limiting. Wait a minute and try again.",
     )
 
+    // An RSS account without its feed link: the sign-in card in place of Home.
+    private fun rssSession(): AccountSession {
+        val store = AccountStore(context, multiProfile = false)
+        store.update(store.activeId) {
+            it.copy(kind = app.lurk.data.ServiceKind.RedditRss, username = null, knownAs = null, token = null, communities = emptyList())
+        }
+        return AccountSession(context, store, store.activeId, Scripts(context), {}, {}, signInFirst = false)
+    }
+    @Test fun rssSignInLight() = shoot("rss-signin", dark = false, ::rssSession) {}
+    @Test fun rssSignInDark() = shoot("rss-signin", dark = true, ::rssSession) {}
+
+    @Test fun emptyFeedLight() = shoot("empty", dark = false) {
+        it.reset(FeedScreen("tea", RedditSorts.feed.first(), it.service, kotlinx.coroutines.MainScope()))
+    }
+
     // Reddit blocking Lurk's browser: the Chrome launcher in place of the feed.
     @Test fun redditChromeLight() {
         app.lurk.data.RedditAccess.init(context)

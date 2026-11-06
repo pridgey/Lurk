@@ -62,6 +62,80 @@ object LurkIcons {
     val Chevron = icon("Chevron", "M9 6l6 6-6 6")
     val Pause = icon("Pause", "M7 5h3v14H7z", "M14 5h3v14h-3z", filled = true)
 
+    val ChevronDown = icon("ChevronDown", "M6 9l6 6 6-6")
+    val Home = icon(
+        "Home",
+        "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8",
+        "M3 10a2 2 0 0 1 0.71-1.53l7-6a2 2 0 0 1 2.58 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+    )
+    val Search = icon("Search", "M19 11a8 8 0 1 1-16 0a8 8 0 1 1 16 0z", "M21 21l-4.3-4.3")
+    val Plus = icon("Plus", "M12 5v14", "M5 12h14")
+    val Check = icon("Check", "M20 6L9 17l-5-5")
+    val Refresh = icon(
+        "Refresh",
+        "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", "M21 3v5h-5",
+        "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", "M8 16H3v5",
+    )
+    val List = icon("List", "M8 6h13", "M8 12h13", "M8 18h13", "M3 6h0.01", "M3 12h0.01", "M3 18h0.01")
+    val Inbox = icon(
+        "Inbox",
+        "M22 12h-6l-2 3h-4l-2-3H2",
+        "M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
+    )
+    val Globe = icon(
+        "Globe",
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z",
+        "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20",
+        "M2 12h20",
+    )
+    val Download = icon("Download", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3")
+    val Terminal = icon("Terminal", "M4 17l6-6-6-6", "M12 19h8")
+    val Rss = icon("Rss", "M4 11a9 9 0 0 1 9 9", "M4 4a16 16 0 0 1 16 16", "M6 19a1 1 0 1 1-2 0a1 1 0 1 1 2 0z")
+    val Lock = icon(
+        "Lock",
+        "M7 11V7a5 5 0 0 1 10 0v4",
+        "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z",
+    )
+    val LogOut = icon("LogOut", "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", "M16 17l5-5-5-5", "M21 12H9")
+    val Info = icon("Info", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", "M12 16v-4", "M12 8h0.01")
+    val Alert = icon(
+        "Alert",
+        "M21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3",
+        "M12 9v4",
+        "M12 17h0.01",
+    )
+    val WifiOff = icon(
+        "WifiOff",
+        "M12 20h0.01", "M8.5 16.43a5 5 0 0 1 7 0", "M2 8.82a15 15 0 0 1 4.18-2.65",
+        "M19 12.86a10 10 0 0 0-2.18-1.42", "M22 8.82a15 15 0 0 0-11.29-3.76", "M5 12.86a10 10 0 0 1 5.17-2.69", "M2 2l20 20",
+    )
+    val Empty = icon(
+        "Empty",
+        "M22 12h-6l-2 3h-4l-2-3H2",
+        "M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
+    )
+    val Chrome = icon(
+        "Chrome",
+        "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z",
+        "M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0z",
+        "M21.17 8H12", "M3.95 6.06L8.54 14", "M10.88 21.94L15.46 14",
+    )
+
+    val Trending = icon("Trending", "M22 7l-8.5 8.5-5-5L2 17", "M16 7h6v6")
+    val MapPin = icon(
+        "MapPin",
+        "M20 10c0 4.99-5.54 10.19-7.4 11.8a1 1 0 0 1-1.2 0C9.54 20.19 4 14.99 4 10a8 8 0 0 1 16 0",
+        "M15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z",
+    )
+
+    /** The icon for a fixed feed (Popular, All, Local), or null to use its letter avatar. */
+    fun feed(community: String): ImageVector? = when (community.lowercase().removePrefix(":")) {
+        "popular" -> Trending
+        "all" -> Globe
+        "local" -> MapPin
+        else -> null
+    }
+
     private fun icon(name: String, vararg paths: String, filled: Boolean = false): ImageVector {
         val builder = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
         paths.forEach { data ->

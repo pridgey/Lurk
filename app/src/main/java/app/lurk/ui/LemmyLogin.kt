@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -76,6 +77,7 @@ fun LemmyLoginDialog(
     }
 
     AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         onDismissRequest = { if (!busy) onCancel() },
         title = { Text(if (instance == null) "Add a Lemmy account" else "Sign in to $instance") },
         text = {
@@ -133,9 +135,13 @@ fun LemmyLoginDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = ::submit, enabled = ready && !busy) {
+            Button(onClick = ::submit, enabled = ready && !busy) {
                 if (busy) {
-                    CircularProgressIndicator(Modifier.size(16.dp).align(Alignment.CenterVertically), strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        Modifier.size(16.dp).align(Alignment.CenterVertically),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     Text("Sign in")
                 }

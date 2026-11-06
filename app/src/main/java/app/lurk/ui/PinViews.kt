@@ -88,7 +88,7 @@ fun LockScreen(
             modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
         ) {
             Spacer(Modifier.weight(1f))
-            Icon(Icons.Default.Lock, null, Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+            IconTile(LurkIcons.Lock, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, size = 56.dp)
             Spacer(Modifier.height(16.dp))
             Text(
                 "Enter the PIN for this private account",
@@ -121,13 +121,14 @@ fun LockScreen(
 
     if (confirmForget) {
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             onDismissRequest = { confirmForget = false },
             title = { Text("Remove this account?") },
             text = {
                 Text("Without the PIN, the only way back in is to remove the account from Lurk and sign in to it again.")
             },
             confirmButton = {
-                TextButton(onClick = { confirmForget = false; onForget() }) { Text("Remove") }
+                TextButton(onClick = { confirmForget = false; onForget() }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
         )

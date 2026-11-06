@@ -297,22 +297,14 @@ private fun SearchField(
     onClear: () -> Unit,
 ) {
     val keyboard = LocalSoftwareKeyboardController.current
-    OutlinedTextField(
+    LurkSearchField(
         value = query,
-        onValueChange = onChange,
-        placeholder = { Text(placeholder, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(Icons.Default.Search, null) },
-        trailingIcon = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = onClear) { Icon(Icons.Default.Clear, "Clear search") }
-            }
-        },
-        singleLine = true,
-        shape = CircleShape,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide(); onSubmit() }),
-        colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+        // The field's clear button sends "": that's a clear here, which also drops the results.
+        onValueChange = { if (it.isEmpty()) onClear() else onChange(it) },
+        placeholder = placeholder,
+        imeAction = ImeAction.Search,
+        onAction = { keyboard?.hide(); onSubmit() },
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
     )
 }
 
@@ -332,11 +324,17 @@ private fun TopicChips(topics: List<Topic>, picked: Topic?, onPick: (Topic) -> U
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
     ) {
         items(topics, key = { it.key }) { topic ->
-            FilterChip(
-                selected = topic == picked,
-                onClick = { onPick(topic) },
-                label = { Text(topic.label) },
-            )
+            val on = topic == picked
+            Surface(
+                shape = CircleShape,
+                color = if (on) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (on) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.height(34.dp).clip(CircleShape).clickable { onPick(topic) },
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 14.dp)) {
+                    Text(topic.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            }
         }
     }
 }

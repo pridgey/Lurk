@@ -13,64 +13,70 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Lurk's own palette: a warm coral accent on soft, slightly warm neutrals.
+// Lurk's own palette: a coral accent on clean, neutral greys. Chrome stays monochrome;
+// coral is kept for actions, votes and the things you've picked.
 private val Coral = Color(0xFFFF5A36)
 private val CoralLight = Color(0xFFFF8A6B)
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFFE5401C),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDDD3),
+    primaryContainer = Color(0xFFFFE4DB),
     onPrimaryContainer = Color(0xFF3B0A00),
-    secondary = Color(0xFF6B5B57),
-    secondaryContainer = Color(0xFFF3E4DF),
-    onSecondaryContainer = Color(0xFF261915),
-    tertiary = Color(0xFF2F7D6B),
-    background = Color(0xFFF6F3F1),
-    onBackground = Color(0xFF1C1A19),
-    surface = Color(0xFFF6F3F1),
-    onSurface = Color(0xFF1C1A19),
-    surfaceVariant = Color(0xFFECE6E3),
-    onSurfaceVariant = Color(0xFF6F6763),
+    secondary = Color(0xFF5F5F68),
+    secondaryContainer = Color(0xFFECECEF),
+    onSecondaryContainer = Color(0xFF1F1F23),
+    tertiary = Color(0xFF1F8A70),
+    background = Color(0xFFF6F6F7),
+    onBackground = Color(0xFF18181B),
+    surface = Color(0xFFF6F6F7),
+    onSurface = Color(0xFF18181B),
+    surfaceVariant = Color(0xFFE9E9EC),
+    onSurfaceVariant = Color(0xFF6B6B74),
     surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFFFFFFF),
-    surfaceContainer = Color(0xFFF0ECEA),
-    surfaceContainerHigh = Color(0xFFEAE5E2),
-    surfaceContainerHighest = Color(0xFFE3DDDA),
-    outline = Color(0xFFB9B0AC),
-    outlineVariant = Color(0xFFE2DBD8),
+    surfaceContainerLow = Color.White,
+    surfaceContainer = Color(0xFFF0F0F2),
+    surfaceContainerHigh = Color(0xFFE9E9EC),
+    surfaceContainerHighest = Color(0xFFE2E2E6),
+    inverseSurface = Color(0xFF18181B),
+    inverseOnSurface = Color(0xFFFAFAFA),
+    outline = Color(0xFFA1A1AA),
+    outlineVariant = Color(0xFFE4E4E7),
 )
 
 private val DarkColors = darkColorScheme(
     primary = CoralLight,
     onPrimary = Color(0xFF3B0A00),
-    primaryContainer = Color(0xFF5A1B0B),
+    primaryContainer = Color(0xFF4E1A0D),
     onPrimaryContainer = Color(0xFFFFDDD3),
-    secondary = Color(0xFFD8C2BC),
-    secondaryContainer = Color(0xFF3A302D),
-    onSecondaryContainer = Color(0xFFF3E4DF),
-    tertiary = Color(0xFF7DD3BE),
-    background = Color(0xFF0F0E0E),
-    onBackground = Color(0xFFECE6E3),
-    surface = Color(0xFF0F0E0E),
-    onSurface = Color(0xFFECE6E3),
-    surfaceVariant = Color(0xFF2A2726),
-    onSurfaceVariant = Color(0xFFA59D99),
-    surfaceContainerLowest = Color(0xFF0A0909),
-    surfaceContainerLow = Color(0xFF191716),
-    surfaceContainer = Color(0xFF1E1C1B),
-    surfaceContainerHigh = Color(0xFF282524),
-    surfaceContainerHighest = Color(0xFF33302E),
-    outline = Color(0xFF6A6360),
-    outlineVariant = Color(0xFF2E2B2A),
+    secondary = Color(0xFFC4C4CC),
+    secondaryContainer = Color(0xFF2A2A2E),
+    onSecondaryContainer = Color(0xFFECECEE),
+    tertiary = Color(0xFF6FD6BC),
+    background = Color(0xFF0A0A0B),
+    onBackground = Color(0xFFECECEE),
+    surface = Color(0xFF0A0A0B),
+    onSurface = Color(0xFFECECEE),
+    surfaceVariant = Color(0xFF27272A),
+    onSurfaceVariant = Color(0xFFA0A0A8),
+    surfaceContainerLowest = Color(0xFF050506),
+    surfaceContainerLow = Color(0xFF151517),
+    surfaceContainer = Color(0xFF1B1B1E),
+    surfaceContainerHigh = Color(0xFF242427),
+    surfaceContainerHighest = Color(0xFF2E2E32),
+    inverseSurface = Color(0xFFECECEE),
+    inverseOnSurface = Color(0xFF18181B),
+    outline = Color(0xFF5A5A62),
+    outlineVariant = Color(0xFF26262A),
 )
 
 private val base = Typography()
 
 private val LurkTypography = Typography(
     headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
-    titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = (-0.2).sp),
+    titleLarge = base.titleLarge.copy(fontWeight = FontWeight.SemiBold, fontSize = 20.sp, lineHeight = 26.sp, letterSpacing = (-0.2).sp),
     titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = 17.sp, lineHeight = 23.sp, letterSpacing = 0.sp),
+    titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = 0.sp),
     bodyLarge = base.bodyLarge.copy(fontSize = 16.sp, lineHeight = 24.sp),
     bodyMedium = base.bodyMedium.copy(fontSize = 15.sp, lineHeight = 21.sp, letterSpacing = 0.1.sp),
     labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold),
@@ -78,9 +84,13 @@ private val LurkTypography = Typography(
 )
 
 private val LurkShapes = Shapes(
+    // Text fields and menus.
+    extraSmall = RoundedCornerShape(14.dp),
     small = RoundedCornerShape(10.dp),
     medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(24.dp),
+    // Dialogs and sheets.
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 /** Upvote and downvote colors, shared by both themes. */

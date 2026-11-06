@@ -630,6 +630,8 @@ fun Notice(text: String, action: String? = null, onAction: () -> Unit = {}, modi
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-        if (action != null) TextButton(onClick = onAction) { Text(action) }
+        if (action != null) {
+            androidx.compose.material3.FilledTonalButton(onClick = onAction, modifier = Modifier.padding(top = 12.dp)) { Text(action) }
+        }
     }
 }

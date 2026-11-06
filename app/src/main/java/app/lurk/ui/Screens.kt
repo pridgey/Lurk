@@ -103,14 +103,21 @@ fun FeedView(
                 item {
                     val error = screen.error
                     when {
-                        error != null -> Column(
-                            Modifier.fillMaxWidth().padding(top = 96.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Notice(error, "Try again", { screen.refresh() }, Modifier.fillMaxWidth())
-                            TextButton(onClick = onViewOnWeb) { Text("View on web") }
-                        }
-                        !screen.loading -> Notice("Nothing here.", modifier = Modifier.fillMaxWidth().padding(top = 96.dp))
+                        error != null -> EmptyState(
+                            icon = LurkIcons.Alert,
+                            title = "Couldn't load posts",
+                            body = error,
+                            action = "Try again",
+                            onAction = { screen.refresh() },
+                            modifier = Modifier.padding(top = 48.dp),
+                            secondary = { TextButton(onClick = onViewOnWeb, modifier = Modifier.padding(top = 4.dp)) { Text("View on web") } },
+                        )
+                        !screen.loading -> EmptyState(
+                            icon = LurkIcons.Empty,
+                            title = "Nothing here yet",
+                            body = "Pull down to check again.",
+                            modifier = Modifier.padding(top = 48.dp),
+                        )
                     }
                 }
                 if (screen.loading && screen.error == null) {
@@ -197,11 +204,11 @@ fun ThreadView(
             }
             when {
                 screen.error != null -> item(key = "error") {
-                    Notice(screen.error!!, "Try again", { screen.load() }, Modifier.fillMaxWidth())
+                    EmptyState(LurkIcons.Alert, "Couldn't load comments", screen.error, "Try again", { screen.load() })
                 }
                 screen.loading && screen.items.isEmpty() -> item(key = "loading") { Loading() }
                 !screen.loading && screen.items.isEmpty() && screen.post != null -> item(key = "empty") {
-                    Notice("No comments yet. Be the first on the web.", modifier = Modifier.fillMaxWidth())
+                    EmptyState(LurkIcons.Comment, "No comments yet", "Be the first, on the web.")
                 }
             }
             item(key = "gap") { Spacer(Modifier.height(8.dp)) }

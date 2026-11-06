@@ -101,7 +101,8 @@ fun AccountSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = state,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { SheetHandle() },
     ) {
         AccountSheetContent(current, accounts, hidden, multiProfile, syncing, syncProblem, authNote, actions, ::pick, standardReddit)
     }
@@ -127,7 +128,7 @@ internal fun AccountSheetContent(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
-            .padding(bottom = 16.dp),
+            .padding(bottom = 24.dp),
     ) {
         CurrentAccountCard(
             current, syncing, syncProblem, authNote,
@@ -135,74 +136,90 @@ internal fun AccountSheetContent(
             onRetry = actions.retrySync,
         )
 
-        Spacer(Modifier.height(8.dp))
-        SwitchRow(
-            icon = LurkIcons.Eye,
-            title = "Show NSFW without tapping",
-            subtitle = "Spoilers still stay hidden",
-            checked = current.showNsfw,
-            onChange = actions.setNsfw,
-        )
-        if (current.label != null) {
+        SectionLabel("This account")
+        RowGroup {
             SwitchRow(
-                icon = Icons.Default.Lock,
-                title = "Require PIN",
-                subtitle = "Ask for it when switching to this account",
-                checked = current.locked,
-                onChange = { on -> pick(if (on) actions.setPin else actions.removePin) },
+                icon = LurkIcons.Eye,
+                title = "Show NSFW without tapping",
+                subtitle = "Spoilers still stay hidden",
+                checked = current.showNsfw,
+                onChange = actions.setNsfw,
             )
-        }
-
-        if (others.isNotEmpty()) {
-            SectionHeader("Switch account")
-            others.forEach { a ->
-                OtherAccountRow(
-                    a, hidden(a),
-                    onClick = { pick { actions.switchTo(a) } },
-                    onSignIn = { pick { actions.signInTo(a) } },
+            if (current.label != null) {
+                GroupDivider()
+                SwitchRow(
+                    icon = LurkIcons.Lock,
+                    title = "Require PIN",
+                    subtitle = "Ask for it when switching to this account",
+                    checked = current.locked,
+                    onChange = { on -> pick(if (on) actions.setPin else actions.removePin) },
                 )
             }
         }
 
+        if (others.isNotEmpty()) {
+            SectionLabel("Switch account")
+            RowGroup {
+                others.forEachIndexed { i, a ->
+                    if (i > 0) GroupDivider()
+                    OtherAccountRow(
+                        a, hidden(a),
+                        onClick = { pick { actions.switchTo(a) } },
+                        onSignIn = { pick { actions.signInTo(a) } },
+                    )
+                }
+            }
+        }
+
         if (multiProfile) {
-            SectionHeader("Add account")
-            ActionRow(Icons.Default.Add, "Reddit (RSS)", onClick = { pick(actions.addRedditRss) })
-            if (standardReddit) ActionRow(Icons.Default.Add, "Reddit", onClick = { pick(actions.addReddit) })
-            ActionRow(Icons.Default.Add, "Lemmy", onClick = { pick(actions.addLemmy) })
-            ActionRow(Icons.Default.Add, "Bluesky", onClick = { pick(actions.addBluesky) })
+            SectionLabel("Add account")
+            RowGroup {
+                AddRow("Reddit", "Front page and subreddits, from RSS", LurkIcons.Rss) { pick(actions.addRedditRss) }
+                if (standardReddit) {
+                    GroupDivider()
+                    AddRow("Reddit (website)", "Signed in on Reddit's site", LurkIcons.Globe) { pick(actions.addReddit) }
+                }
+                GroupDivider()
+                AddRow("Lemmy", "Any instance, or PieFed", LurkIcons.Plus) { pick(actions.addLemmy) }
+                GroupDivider()
+                AddRow("Bluesky", "Your handle and an app password", LurkIcons.Plus) { pick(actions.addBluesky) }
+            }
+
+            SectionLabel("Lurk")
+            RowGroup {
+                SwitchRow(
+                    icon = LurkIcons.Globe,
+                    title = "Standard Reddit accounts",
+                    subtitle = if (standardReddit) "Signed in on Reddit's site. Reddit blocks Lurk's browser right now."
+                        else "Hidden while off. Reddit blocks Lurk's browser right now.",
+                    checked = standardReddit,
+                    onChange = { on -> pick { actions.setStandardReddit(on) } },
+                )
+            }
         }
 
         val canRemove = current.signedIn || current.expired || (multiProfile && accounts.size > 1)
         if (canRemove) {
-            HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-            ActionRow(
-                Icons.AutoMirrored.Filled.ExitToApp,
-                when {
-                    current.signedIn -> "Sign out of ${current.label}"
-                    current.label != null -> "Remove ${current.label}"
-                    else -> "Remove this account"
-                },
-                color = MaterialTheme.colorScheme.error,
-                onClick = { pick(actions.signOut) },
-            )
-        }
-        if (multiProfile) {
-            HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-            SwitchRow(
-                icon = Icons.Default.AccountCircle,
-                title = "Standard Reddit accounts",
-                subtitle = if (standardReddit) "Signed in on Reddit's site. Reddit blocks Lurk's browser right now."
-                    else "Signed in on Reddit's site. Hidden while off; Reddit blocks Lurk's browser right now.",
-                checked = standardReddit,
-                onChange = { on -> pick { actions.setStandardReddit(on) } },
-            )
+            Spacer(Modifier.height(20.dp))
+            RowGroup {
+                GroupRow(
+                    title = when {
+                        current.signedIn -> "Sign out of ${current.label}"
+                        current.label != null -> "Remove ${current.label}"
+                        else -> "Remove this account"
+                    },
+                    titleColor = MaterialTheme.colorScheme.error,
+                    leading = { IconTile(LurkIcons.LogOut, MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer) },
+                    onClick = { pick(actions.signOut) },
+                )
+            }
         }
         if (!multiProfile) {
             Text(
                 "More than one account needs a newer Android System WebView. Update it from the Play Store.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 32.dp, vertical = 16.dp),
             )
         }
     }
@@ -218,8 +235,8 @@ private fun CurrentAccountCard(
     onRetry: () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = PanelShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -296,7 +313,7 @@ private fun ago(time: Long): String =
 @Composable
 private fun Notice(text: String, warning: Boolean) {
     val (bg, fg) = if (warning) {
-        MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+        MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.onSurface
     } else {
         MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
     }
@@ -309,7 +326,7 @@ private fun Notice(text: String, warning: Boolean) {
             .background(bg)
             .padding(12.dp),
     ) {
-        Icon(Icons.Default.Warning, null, tint = fg, modifier = Modifier.size(18.dp))
+        Icon(if (warning) LurkIcons.Info else LurkIcons.Alert, null, tint = fg, modifier = Modifier.size(18.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium, color = fg, modifier = Modifier.padding(start = 10.dp))
     }
 }
@@ -348,92 +365,46 @@ fun AttentionDot(modifier: Modifier, size: Dp) {
 
 @Composable
 private fun OtherAccountRow(account: Account, hidden: Boolean, onClick: () -> Unit, onSignIn: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        AccountAvatar(account, 40.dp, attention = account.expired && !hidden, hidden = hidden)
-        Column(Modifier.padding(start = 14.dp).weight(1f)) {
-            Text(
-                when {
-                    hidden -> "Private account"
-                    else -> account.label ?: "Not signed in"
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                when {
-                    hidden -> "${account.siteName} · PIN needed"
-                    account.expired -> "${account.siteName} · Signed out"
-                    else -> account.siteName
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (account.expired && !hidden) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        when {
-            account.expired && !hidden -> TextButton(onClick = onSignIn) { Text("Sign in") }
-            account.locked && !hidden -> Icon(
-                Icons.Default.Lock, contentDescription = "Needs PIN",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 24.dp, top = 20.dp, bottom = 4.dp),
+    GroupRow(
+        title = if (hidden) "Private account" else account.label ?: "Not signed in",
+        subtitle = when {
+            hidden -> "${account.siteName} · PIN needed"
+            account.expired -> "${account.siteName} · Signed out"
+            else -> account.siteName
+        },
+        subtitleColor = if (account.expired && !hidden) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        leading = { AccountAvatar(account, 36.dp, attention = account.expired && !hidden, hidden = hidden) },
+        trailing = when {
+            account.expired && !hidden -> ({ TextButton(onClick = onSignIn) { Text("Sign in") } })
+            account.locked && !hidden -> ({
+                Icon(LurkIcons.Lock, "Needs PIN", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            })
+            else -> null
+        },
+        onClick = onClick,
     )
 }
 
 @Composable
 private fun SwitchRow(icon: ImageVector, title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable { onChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-    ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
-        Column(Modifier.padding(start = 18.dp).weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
+    GroupRow(
+        title = title,
+        subtitle = subtitle,
+        leading = { IconTile(icon) },
+        trailing = { Switch(checked = checked, onCheckedChange = onChange) },
+        onClick = { onChange(!checked) },
+    )
 }
 
 @Composable
-private fun ActionRow(icon: ImageVector, title: String, color: Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-    ) {
-        Icon(icon, null, tint = if (color == MaterialTheme.colorScheme.onSurface) MaterialTheme.colorScheme.onSurfaceVariant else color, modifier = Modifier.size(22.dp))
-        Text(title, style = MaterialTheme.typography.bodyLarge, color = color, modifier = Modifier.padding(start = 18.dp))
-    }
+private fun AddRow(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit) {
+    GroupRow(
+        title = title,
+        subtitle = subtitle,
+        leading = { IconTile(icon) },
+        trailing = { Icon(LurkIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
+        onClick = onClick,
+    )
 }
 
 /** The top-bar button that opens [AccountSheet]. */

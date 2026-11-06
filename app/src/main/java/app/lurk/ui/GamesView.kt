@@ -97,13 +97,10 @@ fun GamesView(screen: GamesScreen, on: PostHandlers) {
                     }
                 }
                 error != null && screen.days.isEmpty() -> item(key = "error") {
-                    Notice(error, "Try again", { screen.load(refresh = true) }, Modifier.fillMaxWidth().padding(top = 48.dp))
+                    EmptyState(LurkIcons.Alert, "Couldn't load the scores", error, "Try again", { screen.load(refresh = true) })
                 }
                 day == null -> item(key = "empty") {
-                    Notice(
-                        "No game or match threads here in the last week.",
-                        modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
-                    )
+                    EmptyState(LurkIcons.Scores, "No games this week", "No game or match threads here in the last week.")
                 }
             }
 
@@ -159,8 +156,8 @@ private fun StatusLine(screen: GamesScreen) {
 private fun DayChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         shape = CircleShape,
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (selected) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = if (selected) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.height(36.dp).clip(CircleShape).clickable(onClick = onClick),
     ) {
         Box(Modifier.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
@@ -297,8 +294,7 @@ fun ScoreboardBanner(screen: FeedScreen, onOpen: () -> Unit) {
     if (!any) return
     Surface(
         shape = CardShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 5.dp)
@@ -306,12 +302,16 @@ fun ScoreboardBanner(screen: FeedScreen, onOpen: () -> Unit) {
             .clickable(onClick = onOpen),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Icon(LurkIcons.Scores, contentDescription = null)
+            IconTile(LurkIcons.Scores, MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, size = 40.dp)
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                Text("Scoreboard", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("Scores and game threads, by day", style = MaterialTheme.typography.bodySmall)
+                Text("Scoreboard", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Scores and game threads, by day",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Icon(LurkIcons.Chevron, contentDescription = null)
+            Icon(LurkIcons.Chevron, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

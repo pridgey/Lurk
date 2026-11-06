@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -45,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.lurk.data.FixedFeed
@@ -102,26 +104,16 @@ fun SubredditSheet(
         onDismissRequest = onDismiss,
         sheetState = state,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { SheetHandle() },
     ) {
         Column(Modifier.fillMaxHeight(0.92f)) {
-            OutlinedTextField(
+            LurkSearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Find or go to a ${naming.communityNoun}") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, "Clear") }
-                    }
-                },
-                singleLine = true,
-                shape = CircleShape,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { go() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                ),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                placeholder = "Find or go to a ${naming.communityNoun}",
+                imeAction = ImeAction.Go,
+                onAction = { go() },
+                modifier = Modifier.padding(horizontal = 16.dp),
             )
 
             LazyColumn(
@@ -135,11 +127,12 @@ fun SubredditSheet(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         ) {
                             FeedTile("Home", selected == homeKey, Modifier.weight(1f), { pick(onHome) }) {
-                                Icon(Icons.Default.Home, null, Modifier.size(22.dp))
+                                Icon(LurkIcons.Home, null, Modifier.size(22.dp))
                             }
                             for (feed in fixedFeeds) {
                                 FeedTile(feed.label, selected == feed.community.lowercase(), Modifier.weight(1f), { pick { onSubreddit(feed.community) } }) {
-                                    Avatar(feed.label.lowercase(), 22.dp)
+                                    val icon = LurkIcons.feed(feed.community)
+                                    if (icon != null) Icon(icon, null, Modifier.size(22.dp)) else Avatar(feed.label.lowercase(), 22.dp)
                                 }
                             }
                             FeedTile("Discover", selected == discoverKey, Modifier.weight(1f), { pick(onDiscover) }) {
@@ -189,10 +182,10 @@ private fun FeedTile(
     icon: @Composable () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-        modifier = modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) MaterialTheme.colorScheme.inverseSurface else MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = if (selected) MaterialTheme.colorScheme.inverseOnSurface else MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onClick),
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -200,8 +193,21 @@ private fun FeedTile(
         ) {
             icon()
             Spacer(Modifier.height(6.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge)
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
+    }
+}
+
+/** A sheet's grab handle, quieter than Material's. */
+@Composable
+fun SheetHandle() {
+    Box(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 14.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .size(width = 32.dp, height = 4.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)),
+        )
     }
 }
 
@@ -211,8 +217,8 @@ private fun LetterHeader(letter: Char) {
         Text(
             letter.toString(),
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 24.dp, top = 14.dp, bottom = 4.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 24.dp, top = 16.dp, bottom = 6.dp),
         )
     }
 }
@@ -224,21 +230,22 @@ private fun SubredditRow(label: String, avatar: String, selected: Boolean, onCli
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
-            .clip(CircleShape)
-            .then(if (selected) Modifier.background(MaterialTheme.colorScheme.primaryContainer) else Modifier)
+            .clip(RoundedCornerShape(16.dp))
+            .then(if (selected) Modifier.background(MaterialTheme.colorScheme.surfaceContainer) else Modifier)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
-        Avatar(avatar, 32.dp)
+        Avatar(avatar, 34.dp)
         Spacer(Modifier.width(14.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodyLarge,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (selected) FontWeight.SemiBold else null,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        if (selected) Icon(LurkIcons.Check, "Open now", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
     }
 }
 

@@ -16,6 +16,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,74 +49,46 @@ fun RedditChromeView(
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
         item(key = "intro") {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+            InfoCard(
+                icon = LurkIcons.Chrome,
+                title = "Reddit opens in Chrome",
+                body = "Reddit blocks Lurk's built-in browser, so Lurk can't show Reddit itself right now. " +
+                    "Pages open in a Chrome tab instead, signed in as whoever is signed in to Reddit in Chrome. " +
+                    "Lemmy accounts work as usual.",
+                modifier = Modifier.padding(top = 8.dp),
             ) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Reddit opens in Chrome", style = MaterialTheme.typography.titleLarge)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Reddit blocks Lurk's built-in browser, so Lurk can't show Reddit itself right now. " +
-                            "Pages open in a Chrome tab instead, signed in as whoever is signed in to Reddit in Chrome. " +
-                            "Lemmy accounts work as usual.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Button(
-                        onClick = { onOpen(RedditAccess.Urls.HOME) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                    ) { Text("Open Reddit") }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                        TextButton(onClick = { onOpen(RedditAccess.Urls.community("popular")) }) { Text("Popular") }
-                        TextButton(onClick = { onOpen(RedditAccess.Urls.community("all")) }) { Text("All") }
-                        TextButton(onClick = { onOpen(RedditAccess.Urls.COMMUNITIES) }) { Text("Discover") }
-                    }
+                Button(onClick = { onOpen(RedditAccess.Urls.HOME) }, modifier = Modifier.fillMaxWidth()) { Text("Open Reddit") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { onOpen(RedditAccess.Urls.community("popular")) }, modifier = Modifier.weight(1f)) { Text("Popular") }
+                    OutlinedButton(onClick = { onOpen(RedditAccess.Urls.community("all")) }, modifier = Modifier.weight(1f)) { Text("All") }
+                    OutlinedButton(onClick = { onOpen(RedditAccess.Urls.COMMUNITIES) }, modifier = Modifier.weight(1f)) { Text("Discover") }
                 }
             }
         }
         item(key = "rss") {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            InfoCard(
+                icon = LurkIcons.Rss,
+                title = "Read Reddit in Lurk",
+                body = "A Reddit RSS account shows your front page and subreddits from Reddit's RSS feeds. " +
+                    "Comments and votes stay in Chrome.",
+                modifier = Modifier.padding(top = 12.dp),
             ) {
-                Column(Modifier.padding(20.dp)) {
-                    Text("Read Reddit in Lurk", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "A Reddit RSS account shows your front page and subreddits from Reddit's RSS feeds. " +
-                            "Comments and votes stay in Chrome.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(onClick = onSetUpRss, modifier = Modifier.padding(top = 4.dp)) { Text("Add a Reddit RSS account") }
-                }
+                FilledTonalButton(onClick = onSetUpRss, modifier = Modifier.fillMaxWidth()) { Text("Add a Reddit RSS account") }
             }
         }
         if (subreddits.isNotEmpty()) {
-            item(key = "header") {
-                Text(
-                    "Your subreddits",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 24.dp, top = 8.dp, bottom = 4.dp),
-                )
-            }
-            items(subreddits, key = { "s:" + it.lowercase() }) { name ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { onOpen(RedditAccess.Urls.community(name)) }
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                ) {
-                    Avatar(name, 32.dp)
-                    Spacer(Modifier.width(14.dp))
-                    Text("r/$name", style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            item(key = "header") { SectionLabel("Your subreddits", Modifier.padding(top = 8.dp)) }
+            item(key = "subs") {
+                RowGroup {
+                    subreddits.forEachIndexed { i, name ->
+                        if (i > 0) GroupDivider()
+                        GroupRow(
+                            title = "r/$name",
+                            leading = { Avatar(name, 34.dp) },
+                            trailing = { Icon(LurkIcons.External, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
+                            onClick = { onOpen(RedditAccess.Urls.community(name)) },
+                        )
+                    }
                 }
             }
         }

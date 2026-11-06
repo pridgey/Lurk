@@ -92,6 +92,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -431,36 +434,31 @@ private fun AccountContent(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = if (titleTarget != null) {
                             Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(CircleShape)
                                 .clickable(onClickLabel = "Open ${naming.community(titleTarget)}") {
                                     session.push(session.feed(titleTarget))
                                 }
+                                .padding(end = 6.dp)
                         } else {
                             Modifier
                         },
                     ) {
-                        when {
-                            titleCommunity != null -> Avatar(naming.label(titleCommunity), 36.dp)
-                            screen is FeedScreen -> HomeBadge()
-                            screen is DiscoverScreen -> HomeBadge(LurkIcons.Compass)
+                        if (titleCommunity != null) {
+                            Avatar(naming.label(titleCommunity), 30.dp)
+                            Spacer(Modifier.width(10.dp))
                         }
-                        val badged = titleCommunity != null || screen is FeedScreen || screen is DiscoverScreen
-                        Column(Modifier.padding(start = if (badged) 12.dp else 0.dp)) {
-                            Text(
-                                title,
-                                style = MaterialTheme.typography.titleLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                when {
-                                    account.expired -> "${account.label} · signed out"
-                                    else -> account.label ?: account.instance?.let { "Not signed in · $it" } ?: "Not signed in"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.titleLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (titleTarget != null) {
+                            Icon(
+                                LurkIcons.Chevron, null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 2.dp).size(18.dp),
                             )
                         }
                     }
@@ -469,14 +467,12 @@ private fun AccountContent(
                     if (!inChrome && screen is FeedScreen && session.canSubscribe(screen.community)) {
                         val community = screen.community!!
                         val subscribed = session.isSubscribed(community)
-                        IconButton(onClick = { toggleSubscription(community) }) {
-                            Icon(
-                                if (subscribed) Icons.Default.Check else Icons.Default.Add,
-                                contentDescription = if (subscribed) "Unsubscribe from ${naming.community(community)}"
-                                    else "Subscribe to ${naming.community(community)}",
-                                tint = if (subscribed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
+                        JoinButton(
+                            subscribed,
+                            description = if (subscribed) "Unsubscribe from ${naming.community(community)}"
+                                else "Subscribe to ${naming.community(community)}",
+                            onClick = { toggleSubscription(community) },
+                        )
                     }
                     if (!inChrome) when (screen) {
                         is FeedScreen -> screen.sort?.let { sort ->
@@ -783,6 +779,7 @@ private fun AccountContent(
     }
     if (confirmRemovePin) {
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             onDismissRequest = { confirmRemovePin = false },
             title = { Text("Remove the PIN?") },
             text = { Text("Anyone using this phone will be able to switch to ${account.label ?: "this account"}.") },
@@ -790,7 +787,7 @@ private fun AccountContent(
                 TextButton(onClick = {
                     confirmRemovePin = false
                     store.clearPin(account.id)
-                }) { Text("Remove") }
+                }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmRemovePin = false }) { Text("Cancel") } },
         )
@@ -798,6 +795,7 @@ private fun AccountContent(
 
     if (confirmSignOut) {
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             onDismissRequest = { confirmSignOut = false },
             title = { Text(if (account.signedIn) "Sign out of ${account.label}?" else "Remove ${account.label ?: "this account"}?") },
             text = { Text("This removes the account from Lurk on this phone. You can add it again any time.") },
@@ -805,7 +803,7 @@ private fun AccountContent(
                 TextButton(onClick = {
                     confirmSignOut = false
                     session.signOut()
-                }) { Text(if (account.signedIn) "Sign out" else "Remove") }
+                }) { Text(if (account.signedIn) "Sign out" else "Remove", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
                 TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") }
@@ -843,35 +841,80 @@ private fun BoxScope.WebPage(screen: WebScreen, browser: BrowserController) {
 private fun <T> SortMenu(label: String, options: List<T>, name: (T) -> String, onPick: (T) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.padding(end = 4.dp).clip(CircleShape).clickable { open = true },
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .padding(horizontal = 2.dp)
+                .clip(CircleShape)
+                .clickable(onClickLabel = "Sort: $label") { open = true }
+                .padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            ) {
-                Icon(LurkIcons.Sort, contentDescription = "Sort", modifier = Modifier.size(16.dp))
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    modifier = Modifier.padding(start = 6.dp).widthIn(max = 96.dp),
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 96.dp),
+            )
+            Icon(
+                LurkIcons.ChevronDown, null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 2.dp).size(16.dp),
+            )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        LurkMenu(expanded = open, onDismissRequest = { open = false }) {
             options.forEach { option ->
+                val current = name(option) == label
                 DropdownMenuItem(
-                    text = { Text(name(option)) },
+                    text = { Text(name(option), fontWeight = if (current) FontWeight.SemiBold else null) },
+                    trailingIcon = if (current) ({ Icon(LurkIcons.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) }) else null,
                     onClick = {
                         open = false
                         onPick(option)
                     },
                 )
             }
+        }
+    }
+}
+
+/** A dropdown with Lurk's rounded panel look. */
+@Composable
+private fun LurkMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(18.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 0.dp,
+        shadowElevation = 8.dp,
+        modifier = Modifier.widthIn(min = 200.dp),
+        content = content,
+    )
+}
+
+/** Join or leave the community on screen. */
+@Composable
+private fun JoinButton(subscribed: Boolean, description: String, onClick: () -> Unit) {
+    Surface(
+        shape = CircleShape,
+        color = if (subscribed) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.inverseSurface,
+        contentColor = if (subscribed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.inverseOnSurface,
+        modifier = Modifier
+            .padding(horizontal = 4.dp)
+            .height(32.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = description },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp, end = 12.dp)) {
+            Icon(if (subscribed) LurkIcons.Check else LurkIcons.Plus, null, Modifier.size(16.dp))
+            Text(
+                if (subscribed) "Joined" else "Join",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(start = 4.dp),
+            )
         }
     }
 }
@@ -902,7 +945,7 @@ private fun OverflowMenu(
                 if (updateWaiting) AttentionDot(Modifier.align(Alignment.TopEnd), 9.dp)
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        LurkMenu(expanded = open, onDismissRequest = { open = false }) {
             if (onUpdates != null && updateWaiting) {
                 DropdownMenuItem(
                     text = {
@@ -916,33 +959,45 @@ private fun OverflowMenu(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     },
+                    leadingIcon = { MenuIcon(LurkIcons.Download, MaterialTheme.colorScheme.primary) },
                     onClick = { open = false; onUpdates() },
                 )
-                HorizontalDivider()
+                MenuDivider()
             }
-            DropdownMenuItem(text = { Text("Refresh page") }, onClick = { open = false; onRefresh() })
+            DropdownMenuItem(text = { Text("Refresh") }, leadingIcon = { MenuIcon(LurkIcons.Refresh) }, onClick = { open = false; onRefresh() })
             if (onScores != null) {
-                DropdownMenuItem(text = { Text("Scoreboard") }, onClick = { open = false; onScores() })
+                DropdownMenuItem(text = { Text("Scoreboard") }, leadingIcon = { MenuIcon(LurkIcons.Scores) }, onClick = { open = false; onScores() })
             }
             DropdownMenuItem(
                 text = { Text(if (syncing) "Syncing subscriptions…" else "Sync subscriptions") },
                 enabled = !syncing,
+                leadingIcon = { MenuIcon(LurkIcons.List) },
                 onClick = { open = false; onSync() },
             )
             if (onInbox != null) {
-                DropdownMenuItem(text = { Text("Inbox") }, onClick = { open = false; onInbox() })
+                DropdownMenuItem(text = { Text("Inbox") }, leadingIcon = { MenuIcon(LurkIcons.Inbox) }, onClick = { open = false; onInbox() })
             }
             if (onViewOnWeb != null) {
-                DropdownMenuItem(text = { Text("View on web") }, onClick = { open = false; onViewOnWeb() })
+                DropdownMenuItem(text = { Text("View on web") }, leadingIcon = { MenuIcon(LurkIcons.Globe) }, onClick = { open = false; onViewOnWeb() })
             }
-            DropdownMenuItem(text = { Text("Open in browser") }, onClick = { open = false; onOpenOutside() })
-            HorizontalDivider()
+            DropdownMenuItem(text = { Text("Open in browser") }, leadingIcon = { MenuIcon(LurkIcons.External) }, onClick = { open = false; onOpenOutside() })
+            MenuDivider()
             if (onUpdates != null && !updateWaiting) {
-                DropdownMenuItem(text = { Text("Check for updates") }, onClick = { open = false; onUpdates() })
+                DropdownMenuItem(text = { Text("Check for updates") }, leadingIcon = { MenuIcon(LurkIcons.Download) }, onClick = { open = false; onUpdates() })
             }
-            DropdownMenuItem(text = { Text("Engine debug") }, onClick = { open = false; onDebug() })
+            DropdownMenuItem(text = { Text("Engine debug") }, leadingIcon = { MenuIcon(LurkIcons.Terminal) }, onClick = { open = false; onDebug() })
         }
     }
+}
+
+@Composable
+private fun MenuIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    Icon(icon, null, Modifier.size(20.dp), tint = tint)
+}
+
+@Composable
+private fun MenuDivider() {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
 }
 
 @Composable
@@ -963,7 +1018,9 @@ private fun SubredditBar(
     // A swipe up anywhere on the bar opens the drawer.
     var dragged by remember { mutableFloatStateOf(0f) }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shadowElevation = 12.dp,
         modifier = Modifier.draggable(
             orientation = Orientation.Vertical,
             state = rememberDraggableState { dragged += it },
@@ -977,32 +1034,41 @@ private fun SubredditBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClickLabel = "All ${naming.communityNoun.plural()}", onClick = onOpenAll)
-                    .padding(top = 8.dp, bottom = 2.dp),
+                    .padding(top = 8.dp, bottom = 4.dp),
             ) {
                 Box(
                     Modifier
-                        .size(width = 36.dp, height = 4.dp)
+                        .size(width = 32.dp, height = 4.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)),
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)),
                 )
             }
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 item(key = "fixed:home") {
-                    BarChip("Home", selected == HOME_KEY, onHome) {
-                        Icon(Icons.Default.Home, null, Modifier.size(18.dp))
-                    }
+                    BarChip("Home", selected == HOME_KEY, onHome, icon = LurkIcons.Home)
                 }
                 items(fixedFeeds, key = { "fixed:${it.community}" }) { feed ->
-                    BarChip(feed.label, selected == feed.community.lowercase(), { onSubreddit(feed.community) }, avatar = feed.label.lowercase())
+                    val icon = LurkIcons.feed(feed.community)
+                    BarChip(
+                        feed.label, selected == feed.community.lowercase(), { onSubreddit(feed.community) },
+                        icon = icon, avatar = feed.label.lowercase().takeIf { icon == null },
+                    )
                 }
                 item(key = "fixed:discover") {
-                    BarChip("Discover", selected == DISCOVER_KEY, onDiscover) {
-                        Icon(LurkIcons.Compass, null, Modifier.size(18.dp))
-                    }
+                    BarChip("Discover", selected == DISCOVER_KEY, onDiscover, icon = LurkIcons.Compass)
+                }
+                item(key = "divider") {
+                    Box(
+                        Modifier
+                            .padding(horizontal = 4.dp)
+                            .size(width = 1.dp, height = 36.dp)
+                            .padding(vertical = 8.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
                 }
                 when {
                     account.expired -> item(key = "hint:signin") {
@@ -1023,59 +1089,45 @@ private fun SubredditBar(
     }
 }
 
-/** A pill in the subreddit bar: filled with the accent when selected. */
+/** A pill in the bottom bar. The one on screen is inverted (dark on light, light on dark). */
 @Composable
 private fun BarChip(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
     accent: Boolean = false,
-    /** Shows this name's avatar before the label (white on the selected chip). */
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    /** Shows this name's avatar before the label. */
     avatar: String? = null,
-    leading: (@Composable () -> Unit)? = avatar?.let { name ->
-        { Avatar(name, 20.dp, tint = if (selected) MaterialTheme.colorScheme.onPrimary else null) }
-    },
 ) {
     val container = when {
-        selected -> MaterialTheme.colorScheme.primary
+        selected -> MaterialTheme.colorScheme.inverseSurface
         accent -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerHighest
+        else -> MaterialTheme.colorScheme.surfaceContainer
     }
     val content = when {
-        selected -> MaterialTheme.colorScheme.onPrimary
+        selected -> MaterialTheme.colorScheme.inverseOnSurface
         accent -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> MaterialTheme.colorScheme.onSurface
     }
+    val leading = icon != null || avatar != null
     Surface(
         shape = CircleShape,
         color = container,
         contentColor = content,
-        modifier = Modifier.height(38.dp).clip(CircleShape).clickable(onClick = onClick),
+        modifier = Modifier.height(36.dp).clip(CircleShape).clickable(onClick = onClick),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = if (leading != null) 8.dp else 14.dp, end = 14.dp),
+            modifier = Modifier.padding(start = if (leading) 8.dp else 14.dp, end = 14.dp),
         ) {
-            if (leading != null) {
-                leading()
-                Spacer(Modifier.width(8.dp))
+            when {
+                icon != null -> Icon(icon, null, Modifier.padding(start = 2.dp).size(18.dp))
+                avatar != null -> Avatar(avatar, 22.dp, tint = if (selected) content else null)
             }
+            if (leading) Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
-    }
-}
-
-/** The title badge for Home, or another screen with an icon instead of a community. */
-@Composable
-private fun HomeBadge(icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Default.Home) {
-    Box(
-        Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
     }
 }
 

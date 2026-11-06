@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +36,7 @@ fun RssTestDialog(
     val blank = text.isBlank()
 
     AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         onDismissRequest = onCancel,
         title = { Text("Test RSS") },
         text = {
@@ -65,7 +67,7 @@ fun RssTestDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onRun(parsed) }, enabled = blank || parsed != null) {
+            Button(onClick = { onRun(parsed) }, enabled = blank || parsed != null) {
                 Text(if (blank) "Test public feeds" else "Run test")
             }
         },
@@ -89,6 +91,7 @@ fun RssLinkDialog(
     val blank = text.isBlank()
 
     AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         onDismissRequest = onCancel,
         title = { Text(if (knownUser == null) "Add a Reddit RSS account" else "Sign in as u/$knownUser") },
         text = {
@@ -120,7 +123,7 @@ fun RssLinkDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { parsed?.let(onSave) }, enabled = parsed != null) { Text("Sign in") }
+            Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null) { Text("Sign in") }
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )

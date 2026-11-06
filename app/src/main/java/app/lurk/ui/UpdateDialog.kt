@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,6 +58,7 @@ fun UpdateDialog(updater: Updater, onClose: () -> Unit) {
 
     val busy = state is UpdateState.Downloading || state is UpdateState.Installing
     AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         onDismissRequest = onClose, // a download carries on; the ⋮ menu shows its progress
         title = {
             Text(
@@ -123,7 +125,7 @@ fun UpdateDialog(updater: Updater, onClose: () -> Unit) {
             val release = updater.available
             when {
                 busy -> TextButton(onClick = onClose) { Text("Hide") }
-                release != null -> TextButton(onClick = { start(release) }) {
+                release != null -> Button(onClick = { start(release) }) {
                     Text(if (state is UpdateState.Failed) "Try again" else "Download and install")
                 }
                 state is UpdateState.Failed -> TextButton(onClick = { updater.startCheck() }) { Text("Try again") }

@@ -1,6 +1,14 @@
 package app.lurk.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,25 +26,15 @@ import app.lurk.data.FeedScreen
 /** An RSS account without its feed link yet. */
 @Composable
 fun RssSignInView(onSignIn: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
+    InfoCard(
+        icon = LurkIcons.Rss,
+        title = "Reddit, through RSS",
+        body = "Lurk reads your front page from its private RSS feed, and fills the bottom bar with the " +
+            "subreddits it sees there. Each subreddit loads from its own feed. RSS has posts only: " +
+            "comments and votes open in Chrome.",
+        modifier = Modifier.padding(top = 8.dp),
     ) {
-        Column(Modifier.padding(20.dp)) {
-            Text("Reddit, through RSS", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Lurk reads your front page from its private RSS feed, and fills the bottom bar with the " +
-                    "subreddits it sees there. Each subreddit loads from its own feed. RSS has posts only: " +
-                    "comments and votes open in Chrome.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(onClick = onSignIn, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                Text("Add your feed link")
-            }
-        }
+        Button(onClick = onSignIn, modifier = Modifier.fillMaxWidth()) { Text("Add your feed link") }
     }
 }
 
@@ -44,19 +42,27 @@ fun RssSignInView(onSignIn: () -> Unit) {
 @Composable
 fun RssFeedHeader(screen: FeedScreen) {
     val fetched = screen.fetchedAt ?: return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
-        Text(
-            "Updated " + ago(fetched / 1000).let { if (it == "now") "just now" else "$it ago" } + " · comments open in Chrome",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        screen.notice?.let {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.tertiary))
             Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 2.dp),
+                "Updated " + ago(fetched / 1000).let { if (it == "now") "just now" else "$it ago" } + " · comments open in Chrome",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp),
             )
+        }
+        screen.notice?.let {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Row(Modifier.padding(12.dp)) {
+                    Icon(LurkIcons.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 10.dp))
+                }
+            }
         }
     }
 }
