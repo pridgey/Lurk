@@ -43,6 +43,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.draw.clip
@@ -908,13 +909,15 @@ private fun JoinButton(subscribed: Boolean, description: String, onClick: () -> 
             .clickable(onClick = onClick)
             .semantics { contentDescription = description },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp, end = 12.dp)) {
+        // Joined is just a check, leaving the title room; Join spells itself out.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = if (subscribed) Modifier.size(32.dp).wrapContentSize() else Modifier.padding(start = 10.dp, end = 12.dp),
+        ) {
             Icon(if (subscribed) LurkIcons.Check else LurkIcons.Plus, null, Modifier.size(16.dp))
-            Text(
-                if (subscribed) "Joined" else "Join",
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(start = 4.dp),
-            )
+            if (!subscribed) {
+                Text("Join", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 4.dp))
+            }
         }
     }
 }

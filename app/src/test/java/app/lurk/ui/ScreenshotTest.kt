@@ -183,7 +183,7 @@ class ScreenshotTest {
         val actions = AccountActions(noop, noop, {}, {}, noop, noop, noop, noop, {}, noop, noop, noop)
         compose.setContent {
             LurkTheme(darkOverride = dark) {
-                androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow) {
+                androidx.compose.material3.Surface(color = androidx.compose.material3.MaterialTheme.colorScheme.surface) {
                     androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(top = 24.dp)) {
                         AccountSheetContent(
                             current, listOf(current) + others, hidden = { it.id == "e" }, multiProfile = true,
