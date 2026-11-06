@@ -91,6 +91,23 @@ class FeedScreen(
         }
     }
 
+    /**
+     * Adds [extra] posts just below the screen, spread out, so they turn up as you scroll on
+     * and nothing you're looking at moves. Skips any already here.
+     */
+    fun mixIn(extra: List<Post>, spacing: Int) {
+        if (loading) return
+        val have = posts.mapTo(HashSet()) { it.name }
+        val add = extra.filter { have.add(it.name) }
+        if (add.isEmpty()) return
+        val index = posts.withIndex().associate { (i, p) -> p.name to i }
+        val lastShown = listState.layoutInfo.visibleItemsInfo.mapNotNull { index[it.key as? String] }.maxOrNull() ?: -1
+        // One post below the screen's last, so it isn't added in view.
+        val merged = interleave(posts.toList(), add, lastShown + 2, spacing)
+        // Insert one at a time: replacing the whole list would make the list lose its place.
+        merged.forEachIndexed { i, p -> if (p.name !in index) posts.add(i, p) }
+    }
+
     /** Stops a load in progress, once the screen is gone. */
     fun cancel() {
         generation++
@@ -117,6 +134,29 @@ class FeedScreen(
         sort = newSort
         refresh()
     }
+}
+
+/**
+ * [base] with [extra] slotted in: the first at [start], then one every [every] posts of
+ * [base]. Whatever doesn't fit goes on the end.
+ */
+fun interleave(base: List<Post>, extra: List<Post>, start: Int, every: Int): List<Post> {
+    val inBase = base.mapTo(HashSet()) { it.name }
+    val queue = ArrayDeque(extra.filter { it.name !in inBase })
+    if (queue.isEmpty()) return base
+    val out = ArrayList<Post>(base.size + queue.size)
+    var next = start.coerceAtLeast(0)
+    var taken = 0
+    for (p in base) {
+        while (taken == next && queue.isNotEmpty()) {
+            out += queue.removeFirst()
+            next += every.coerceAtLeast(1)
+        }
+        out += p
+        taken++
+    }
+    out.addAll(queue)
+    return out
 }
 
 /** A post and its comments. */

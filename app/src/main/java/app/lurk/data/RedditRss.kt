@@ -23,6 +23,9 @@ import org.xmlpull.v1.XmlPullParser
 /** Reddit no longer accepts the front page's feed link. */
 class FeedLinkRejected(message: String) : ServiceException(message)
 
+/** Reddit has no feed for a subreddit: private, banned or gone. */
+class NoSuchFeed(message: String) : ServiceException(message)
+
 /**
  * Reddit's RSS feeds for one account: the front page's private feed (from
  * reddit.com/prefs/feeds) and subreddit feeds. RSS has posts only: no scores, comment
@@ -85,6 +88,13 @@ class RedditRss(context: Context, accountId: String, private val build: Int, pri
     /** Whether [community]'s saved first page (Home for null) is old enough to fetch again unasked. */
     fun isStale(community: String?): Boolean =
         (saved(key(community))?.fetchedAt ?: 0L).let { System.currentTimeMillis() - it > FRESH_MS }
+
+    /** When [community]'s saved first page was fetched (ms), or null when there's none. */
+    fun savedAt(community: String?): Long? = saved(key(community))?.fetchedAt
+
+    /** Whether a subreddit feed would go out now, without waiting on Reddit's limit. */
+    fun subredditReady(): Boolean =
+        waiting == null && !mutex.isLocked && publicReadyAt <= SystemClock.elapsedRealtime()
 
     private val mutex = Mutex()
     private var lastRequestAt = 0L
@@ -192,7 +202,7 @@ class RedditRss(context: Context, accountId: String, private val build: Int, pri
                     auth = false
                 }
                 result.status == 404 || result.status in 300..399 ->
-                    throw ServiceException("Reddit has no feed for r/$community. It may be private or banned.")
+                    throw NoSuchFeed("Reddit has no feed for r/$community. It may be private or banned.")
                 else -> return savedOr(saved, failure(result.status))
             }
         }

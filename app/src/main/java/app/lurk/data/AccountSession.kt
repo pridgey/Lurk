@@ -14,6 +14,8 @@ import app.lurk.web.Decision
 import app.lurk.web.Scripts
 import app.lurk.web.WebProfiles
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
@@ -179,10 +181,47 @@ class AccountSession(
      * from the top of the list, so it never yanks you from where you were reading.
      */
     fun onResume() {
-        val feed = current as? FeedScreen ?: return
         val rss = service as? RedditRssService ?: return
+        startMixing(rss)
+        val feed = current as? FeedScreen ?: return
         if (rss.isStale(feed.community) && !feed.loading && feed.listState.firstVisibleItemIndex == 0) {
             feed.refresh(pulled = false)
+        }
+    }
+
+    /** Out of the app: Home stops taking posts from subreddits, so it doesn't spend requests unseen. */
+    fun onPause() {
+        mixing?.cancel()
+        mixing = null
+    }
+
+    private var mixing: Job? = null
+
+    /**
+     * While the app is open on an RSS Home, every couple of minutes it takes a few new
+     * posts from one of the account's subreddits, in turn, and slots them in below the
+     * screen, so Home keeps getting new posts through the day.
+     */
+    private fun startMixing(rss: RedditRssService) {
+        if (mixing?.isActive == true) return
+        mixing = scope.launch {
+            while (true) {
+                delay(MIX_FIRST_MS)
+                val home = (current as? FeedScreen)?.takeIf { it.community == null && !it.loading && it.posts.isNotEmpty() }
+                    ?: continue
+                val fresh = try {
+                    rss.freshForHome(home.posts.mapTo(HashSet()) { it.name })
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                if (fresh.isNotEmpty() && current === home) {
+                    home.mixIn(fresh, RedditRssService.MIX_SPACING)
+                    service.log.note("Home: mixed in ${fresh.size} from r/${fresh.first().community}")
+                }
+                delay(RedditRssService.MIX_EVERY_MS - MIX_FIRST_MS)
+            }
         }
     }
 
@@ -537,3 +576,6 @@ class AccountSession(
         service.destroy()
     }
 }
+
+/** How soon after opening the app, or coming back to Home, it first takes posts from a subreddit. */
+private const val MIX_FIRST_MS = 30_000L

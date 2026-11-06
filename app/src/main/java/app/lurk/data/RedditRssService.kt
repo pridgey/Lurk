@@ -62,8 +62,51 @@ class RedditRssService(
             onLinkRejected()
             throw e
         }
-        if (community == null) learn(page)
-        return page
+        if (community != null) return page
+        learn(page)
+        if (cursor != null) return page
+        // Posts mixed in a while ago stay through a refresh, below the front page's first few.
+        val keep = System.currentTimeMillis() - MIX_KEEP_MS
+        mixed.removeAll { it.second < keep }
+        return FeedPage(interleave(page.posts, mixed.map { it.first }, MIX_START, MIX_SPACING), page.after, page.fetchedAt, page.notice)
+    }
+
+    // --- Mixing subreddit posts into Home ---
+
+    /** Posts mixed into Home, newest first, with when (ms). */
+    private val mixed = ArrayList<Pair<Post, Long>>()
+    /** Every post mixed in this session, so none comes back after it's scrolled past. */
+    private val everMixed = HashSet<String>()
+    /** Subreddits whose feed failed this session (private, banned). */
+    private val skip = HashSet<String>()
+
+    /**
+     * A few recent posts from one learned subreddit that [shown] doesn't have, for Home.
+     * Takes the subreddit fetched longest ago, and spends at most one subreddit-feed request,
+     * only when Reddit's limit lets it go out at once. Empty when there's nothing to add.
+     */
+    suspend fun freshForHome(shown: Set<String>): List<Post> {
+        if (link == null) return emptyList()
+        val now = System.currentTimeMillis()
+        val sub = learned.values.map { it.first }
+            .filter { it.lowercase() !in skip }
+            .minByOrNull { rss.savedAt(it) ?: 0L } ?: return emptyList()
+        val fresh = now - (rss.savedAt(sub) ?: 0L) < RedditRss.FRESH_MS
+        if (!fresh && !rss.subredditReady()) return emptyList()
+        val page = try {
+            rss.page(sub, null, force = false)
+        } catch (e: NoSuchFeed) {
+            skip += sub.lowercase()
+            return emptyList()
+        }
+        val newest = now / 1000 - MIX_MAX_AGE_S
+        val picked = page.posts
+            .filter { it.createdUtc >= newest && it.name !in shown && it.name !in everMixed }
+            .take(MIX_PER_SUB)
+        picked.forEach { everMixed += it.name }
+        mixed.addAll(0, picked.map { it to now })
+        while (mixed.size > MIX_KEEP_MAX) mixed.removeAt(mixed.lastIndex)
+        return picked
     }
 
     /** Whether [community]'s saved posts are old enough to fetch again when coming back to the app. */
@@ -95,6 +138,9 @@ class RedditRssService(
         rss.clearCache()
         learned.clear()
         saveLearned()
+        mixed.clear()
+        everMixed.clear()
+        skip.clear()
     }
 
     // --- Subreddits learned from the front page ---
@@ -134,6 +180,19 @@ class RedditRssService(
     companion object {
         /** A subreddit with no front page post in this long leaves the bar. */
         const val FORGET_AFTER_MS = 30L * 24 * 60 * 60_000
+
+        /** How often Home takes posts from another subreddit while it's on screen. */
+        const val MIX_EVERY_MS = 2 * 60_000L
+        /** Posts taken from each subreddit per turn. */
+        private const val MIX_PER_SUB = 3
+        /** Only posts this new (s) are mixed in: older ones aren't news, and are often pinned. */
+        private const val MIX_MAX_AGE_S = 24 * 60 * 60L
+        /** Mixed posts kept through a Home refresh for this long, up to [MIX_KEEP_MAX]. */
+        private const val MIX_KEEP_MS = 3 * 60 * 60_000L
+        private const val MIX_KEEP_MAX = 30
+        /** On a refresh, mixed posts go in from this position, one every [MIX_SPACING]. */
+        private const val MIX_START = 4
+        const val MIX_SPACING = 4
 
         private const val NO_COMMENTS = "RSS has posts only. Open the post on Reddit for that."
 

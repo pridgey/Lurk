@@ -229,12 +229,21 @@ private fun AccountContent(
     val inChrome = session.inChrome
     val goHome: () -> Unit = { if (inChrome) session.openInChrome(RedditAccess.Urls.HOME) else session.reset(session.feed(null)) }
 
-    // Back in the app after a while: an RSS feed checks for new posts.
+    // Back in the app after a while: an RSS feed checks for new posts, and Home mixes in subreddits' while open.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, session) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) session.onResume() }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> session.onResume()
+                Lifecycle.Event.ON_PAUSE -> session.onPause()
+                else -> Unit
+            }
+        }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            session.onPause()
+        }
     }
     val goCommunity: (String) -> Unit = { name ->
         if (inChrome) session.openInChrome(RedditAccess.Urls.community(name)) else session.reset(session.feed(name))
