@@ -1,0 +1,26 @@
+name: Screenshots
+
+# Renders the screens in ScreenshotTest to PNGs, for reviewing the design without a device.
+# Runs on branches other than main (main builds the release).
+on:
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Render screenshots
+        run: ./gradlew testDebugUnitTest --tests 'app.lurk.ui.ScreenshotTest' --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: app/build/screenshots/*.png
