@@ -10,7 +10,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
-/** Remembering posts seen in feeds, and the ones hidden. */
+/** Remembering posts seen in feeds, and the setting that hides them. */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
 class SeenPostsTest {
@@ -20,36 +20,33 @@ class SeenPostsTest {
     @Before
     fun clear() {
         context.getSharedPreferences("seen_posts", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("accounts", Context.MODE_PRIVATE).edit().clear().commit()
     }
 
     @Test
-    fun seenAndHiddenLastAcrossRestarts() {
+    fun seenPostsLastAcrossRestarts() {
         val first = SeenPosts(context, "a")
         first.mark(listOf("t3_one", "t3_two"))
-        first.hide("t3_three")
         first.flush()
 
         val again = SeenPosts(context, "a")
         assertTrue(again.wasSeen("t3_one"))
         assertTrue(again.wasSeen("t3_two"))
-        assertTrue(again.isHidden("t3_three"))
-        assertFalse(again.wasSeen("t3_four"))
+        assertFalse(again.wasSeen("t3_three"))
     }
 
     @Test
     fun accountsKeepTheirOwn() {
-        SeenPosts(context, "a").apply { mark(listOf("t3_one")); hide("t3_two"); flush() }
-        val other = SeenPosts(context, "b")
-        assertFalse(other.wasSeen("t3_one"))
-        assertFalse(other.isHidden("t3_two"))
+        SeenPosts(context, "a").apply { mark(listOf("t3_one")); flush() }
+        assertFalse(SeenPosts(context, "b").wasSeen("t3_one"))
     }
 
     @Test
-    fun unhideBringsItBack() {
-        val seen = SeenPosts(context, "a")
-        seen.hide("t3_one")
-        seen.unhide("t3_one")
-        assertFalse(seen.isHidden("t3_one"))
-        assertFalse(SeenPosts(context, "a").isHidden("t3_one"))
+    fun hideSeenSettingIsSavedPerAccount() {
+        val store = AccountStore(context, multiProfile = true)
+        val id = store.activeId
+        store.update(id) { it.copy(hideSeen = true) }
+        val reopened = AccountStore(context, multiProfile = true)
+        assertTrue(reopened.find(id)!!.hideSeen)
     }
 }

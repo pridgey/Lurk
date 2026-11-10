@@ -20,8 +20,10 @@ class FeedScreen(
     sort: Sort?,
     private val service: Service,
     private val scope: CoroutineScope,
-    /** What the account has seen and hidden; null keeps no record (previews, tests). */
+    /** Posts the account has had on screen; null keeps no record (previews, tests). */
     private val seen: SeenPosts? = null,
+    /** Whether to leave out posts already seen, read at each load. */
+    private val hideSeen: () -> Boolean = { false },
 ) : Screen {
     var sort by mutableStateOf(sort)
         private set
@@ -50,8 +52,9 @@ class FeedScreen(
     private var generation = 0
     /** The next first-page load is a pull to refresh. */
     private var force = false
-    /** Posts that were on screen before they loaded here, so they offer a hide button. */
-    private val repeats = HashSet<String>()
+    /** Whether loads since the last refresh left out posts already seen. */
+    var skippedSeen by mutableStateOf(false)
+        private set
 
     val label: String
         get() = community?.let { c ->
@@ -73,7 +76,7 @@ class FeedScreen(
         job = scope.launch {
             try {
                 var pages = 0
-                // A first page that's all hidden posts would look empty: keep going a little.
+                // A first page of only seen posts would look empty: keep going a little.
                 do {
                     val first = after == null
                     val page = service.feed(community, sort, after, refresh = force && first)
@@ -114,16 +117,17 @@ class FeedScreen(
         merged.forEachIndexed { i, p -> if (p.name !in index) posts.add(i, p) }
     }
 
-    /** Of [incoming], the posts not already here or hidden, noting which were seen before. */
+    /** Of [incoming], the posts not already here, less any already seen if the account hides those. */
     private fun fresh(incoming: List<Post>): List<Post> {
         val have = posts.mapTo(HashSet()) { it.name }
-        return incoming.filter { have.add(it.name) && seen?.isHidden(it.name) != true }.onEach {
-            if (seen?.wasSeen(it.name) == true) repeats += it.name
+        val skip = seen?.takeIf { hideSeen() }
+        return incoming.filter { post ->
+            if (!have.add(post.name)) return@filter false
+            val wasSeen = skip?.wasSeen(post.name) == true
+            if (wasSeen) skippedSeen = true
+            !wasSeen
         }
     }
-
-    /** Whether [post] was on screen in an earlier load. Fixed when it loads, so it doesn't change as you look. */
-    fun isRepeat(post: Post): Boolean = post.name in repeats
 
     /** Notes posts that have been on screen a moment. */
     fun markSeen(names: Collection<String>) {
@@ -132,23 +136,6 @@ class FeedScreen(
 
     fun saveSeen() {
         seen?.flush()
-    }
-
-    /** Takes [post] out of the feed and keeps it out of later ones. Returns how to undo it. */
-    fun hide(post: Post): () -> Unit {
-        val index = posts.indexOfFirst { it.name == post.name }
-        if (index < 0) return {}
-        val gen = generation
-        seen?.hide(post.name)
-        posts.removeAt(index)
-        // Hiding near the end may leave too little to scroll to the next page.
-        if (posts.size - index < 5) loadMore()
-        return {
-            seen?.unhide(post.name)
-            if (gen == generation && posts.none { it.name == post.name }) {
-                posts.add(index.coerceAtMost(posts.size), post)
-            }
-        }
     }
 
     /** Stops a load in progress, once the screen is gone. */
@@ -164,7 +151,7 @@ class FeedScreen(
         generation++
         job?.cancel()
         posts.clear()
-        repeats.clear()
+        skippedSeen = false
         after = null
         endReached = false
         loading = false

@@ -169,7 +169,7 @@ class AccountSession(
     // --- Navigation ---
 
     fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen =
-        FeedScreen(community, sort, service, scope, seenPosts).also { it.loadMore() }
+        FeedScreen(community, sort, service, scope, seenPosts, hideSeen = { account?.hideSeen == true }).also { it.loadMore() }
 
     /** An RSS account: posts only, with comments, users and other pages on Reddit in Chrome. */
     val isRss: Boolean get() = service.kind == ServiceKind.RedditRss

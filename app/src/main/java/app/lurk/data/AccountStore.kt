@@ -33,6 +33,8 @@ data class Account(
     val pinSalt: String? = null,
     /** Show NSFW media without a tap to reveal. Spoilers still hide. */
     val showNsfw: Boolean = false,
+    /** Leave posts already seen (on screen in an earlier load) out of feeds. */
+    val hideSeen: Boolean = false,
     /** Lemmy: the instance's host, e.g. "lemmy.world". */
     val instance: String? = null,
     /**
@@ -144,7 +146,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
             if (accounts.any { it.kind == ServiceKind.RedditRss && it.token == link }) return@forEach
             val user = RedditRssService.userOf(link)
             accounts = accounts + newAccount().copy(
-                kind = ServiceKind.RedditRss, username = user, knownAs = user, token = link, showNsfw = a.showNsfw,
+                kind = ServiceKind.RedditRss, username = user, knownAs = user, token = link, showNsfw = a.showNsfw, hideSeen = a.hideSeen,
             )
             if (activeId == a.id && hidesStandardReddit) activeId = accounts.last().id
         }
@@ -216,7 +218,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
      */
     fun absorb(from: String, into: String) {
         val old = find(from) ?: return
-        update(into) { it.copy(pinHash = old.pinHash, pinSalt = old.pinSalt, showNsfw = old.showNsfw) }
+        update(into) { it.copy(pinHash = old.pinHash, pinSalt = old.pinSalt, showNsfw = old.showNsfw, hideSeen = old.hideSeen) }
         if (old.locked) unlockedId = into
         runCatching { WebProfiles.wipe(profileFor(from)) }
         remove(from)
@@ -271,6 +273,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     pinHash = o.optString("pinHash").ifBlank { null },
                     pinSalt = o.optString("pinSalt").ifBlank { null },
                     showNsfw = o.optBoolean("showNsfw"),
+                    hideSeen = o.optBoolean("hideSeen"),
                     instance = o.optString("instance").ifBlank { null },
                     token = o.optString("token").ifBlank { null },
                     refreshToken = o.optString("refreshToken").ifBlank { null },
@@ -292,6 +295,7 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     .put("pinHash", a.pinHash ?: "")
                     .put("pinSalt", a.pinSalt ?: "")
                     .put("showNsfw", a.showNsfw)
+                    .put("hideSeen", a.hideSeen)
                     .put("kind", a.kind.name)
                     .put("instance", a.instance ?: "")
                     .put("token", a.token ?: "")

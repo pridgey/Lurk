@@ -54,7 +54,6 @@ import app.lurk.data.Actions
 import app.lurk.data.Comment
 import app.lurk.data.FeedScreen
 import app.lurk.data.More
-import app.lurk.data.Post
 import app.lurk.data.ThreadScreen
 import android.os.Build
 import android.widget.Toast
@@ -79,11 +78,9 @@ fun FeedView(
     onViewOnWeb: () -> Unit,
     /** Shown above the posts, e.g. where an RSS Home's posts come from. */
     header: (@Composable () -> Unit)? = null,
-    /** Hides a post seen on an earlier load; repeat posts show a button for it. */
-    onHide: ((Post) -> Unit)? = null,
 ) {
     // Load the next page when the list gets near its end, and again after a load that
-    // left it there (one whose posts were mostly hidden or already shown).
+    // left it there (one whose posts were mostly seen or already shown).
     LaunchedEffect(screen) {
         snapshotFlow {
             val info = screen.listState.layoutInfo
@@ -95,7 +92,7 @@ fun FeedView(
             .collect { if (screen.error == null) screen.loadMore() }
     }
 
-    // Note posts that stay at least half on screen for a second, so later loads know they're repeats.
+    // Note posts that stay at least half on screen for a second, so later loads can leave them out.
     LaunchedEffect(screen) {
         val since = HashMap<String, Long>()
         try {
@@ -143,6 +140,12 @@ fun FeedView(
                             modifier = Modifier.padding(top = 48.dp),
                             secondary = { TextButton(onClick = onViewOnWeb, modifier = Modifier.padding(top = 4.dp)) { Text("View on web") } },
                         )
+                        !screen.loading && screen.skippedSeen -> EmptyState(
+                            icon = LurkIcons.Check,
+                            title = "You're all caught up",
+                            body = "Posts you've seen are hidden. Pull down to check for new ones.",
+                            modifier = Modifier.padding(top = 48.dp),
+                        )
                         !screen.loading -> EmptyState(
                             icon = LurkIcons.Empty,
                             title = "Nothing here yet",
@@ -176,8 +179,7 @@ fun FeedView(
         ) {
             header?.let { item(key = "header") { it() } }
             items(screen.posts, key = { it.name }) { post ->
-                val hide: (() -> Unit)? = if (onHide != null && screen.isRepeat(post)) ({ onHide(post) }) else null
-                PostCard(post, screen.showsCommunity, actions, on, onHide = hide)
+                PostCard(post, screen.showsCommunity, actions, on)
             }
             item(key = "footer") {
                 when {

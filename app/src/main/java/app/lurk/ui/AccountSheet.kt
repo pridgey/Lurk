@@ -70,6 +70,8 @@ class AccountActions(
     val signOut: () -> Unit,
     /** Offer standard Reddit accounts (signed in on Reddit's site), or hide them. */
     val setStandardReddit: (Boolean) -> Unit = {},
+    /** Leave posts already seen out of this account's feeds. */
+    val setHideSeen: (Boolean) -> Unit = {},
 )
 
 /**
@@ -144,6 +146,14 @@ internal fun AccountSheetContent(
                 subtitle = "Spoilers still stay hidden",
                 checked = current.showNsfw,
                 onChange = actions.setNsfw,
+            )
+            GroupDivider()
+            SwitchRow(
+                icon = LurkIcons.EyeOff,
+                title = "Hide posts I've seen",
+                subtitle = "Feeds show only posts you haven't scrolled past",
+                checked = current.hideSeen,
+                onChange = actions.setHideSeen,
             )
             if (current.label != null) {
                 GroupDivider()
