@@ -69,6 +69,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -561,6 +562,15 @@ private fun AccountContent(
                         FeedView(
                             screen, session.actions, handlers,
                             onViewOnWeb = { session.openWeb(screen.webUrl) },
+                            onHide = { post ->
+                                val undo = screen.hide(post)
+                                scope.launch {
+                                    // One at a time: hiding several in a row shouldn't queue a message for each.
+                                    snackbar.currentSnackbarData?.dismiss()
+                                    val result = snackbar.showSnackbar("Post hidden", actionLabel = "Undo", duration = SnackbarDuration.Short)
+                                    if (result == SnackbarResult.ActionPerformed) undo()
+                                }
+                            },
                             header = if (!session.isRss && scores == null) null else ({
                                 Column {
                                     if (session.isRss) RssFeedHeader(screen)

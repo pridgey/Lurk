@@ -54,6 +54,7 @@ import app.lurk.data.Actions
 import app.lurk.data.Comment
 import app.lurk.data.FeedScreen
 import app.lurk.data.More
+import app.lurk.data.Post
 import app.lurk.data.ThreadScreen
 import android.os.Build
 import android.widget.Toast
@@ -67,6 +68,7 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,17 +79,46 @@ fun FeedView(
     onViewOnWeb: () -> Unit,
     /** Shown above the posts, e.g. where an RSS Home's posts come from. */
     header: (@Composable () -> Unit)? = null,
+    /** Hides a post seen on an earlier load; repeat posts show a button for it. */
+    onHide: ((Post) -> Unit)? = null,
 ) {
-    // Load the next page when the list gets near its end.
+    // Load the next page when the list gets near its end, and again after a load that
+    // left it there (one whose posts were mostly hidden or already shown).
     LaunchedEffect(screen) {
         snapshotFlow {
             val info = screen.listState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            info.totalItemsCount > 0 && last >= info.totalItemsCount - 5
+            info.totalItemsCount > 0 && last >= info.totalItemsCount - 5 && !screen.loading
         }
             .distinctUntilChanged()
             .filter { it }
             .collect { if (screen.error == null) screen.loadMore() }
+    }
+
+    // Note posts that stay at least half on screen for a second, so later loads know they're repeats.
+    LaunchedEffect(screen) {
+        val since = HashMap<String, Long>()
+        try {
+            while (true) {
+                delay(500)
+                val info = screen.listState.layoutInfo
+                val names = screen.posts.mapTo(HashSet()) { it.name }
+                val viewport = info.viewportEndOffset - info.viewportStartOffset
+                val shown = info.visibleItemsInfo.mapNotNull { item ->
+                    val name = (item.key as? String)?.takeIf { it in names } ?: return@mapNotNull null
+                    val top = maxOf(item.offset, info.viewportStartOffset)
+                    val bottom = minOf(item.offset + item.size, info.viewportEndOffset)
+                    name.takeIf { bottom - top >= minOf(item.size, viewport) / 2 }
+                }.toSet()
+                val now = System.currentTimeMillis()
+                since.keys.retainAll(shown)
+                shown.forEach { since.getOrPut(it) { now } }
+                val done = since.filterValues { now - it >= 1_000 }.keys
+                if (done.isNotEmpty()) screen.markSeen(done)
+            }
+        } finally {
+            screen.saveSeen()
+        }
     }
 
     PullToRefreshBox(
@@ -145,7 +176,8 @@ fun FeedView(
         ) {
             header?.let { item(key = "header") { it() } }
             items(screen.posts, key = { it.name }) { post ->
-                PostCard(post, screen.showsCommunity, actions, on)
+                val hide: (() -> Unit)? = if (onHide != null && screen.isRepeat(post)) ({ onHide(post) }) else null
+                PostCard(post, screen.showsCommunity, actions, on, onHide = hide)
             }
             item(key = "footer") {
                 when {

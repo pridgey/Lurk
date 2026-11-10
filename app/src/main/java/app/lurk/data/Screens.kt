@@ -20,6 +20,8 @@ class FeedScreen(
     sort: Sort?,
     private val service: Service,
     private val scope: CoroutineScope,
+    /** What the account has seen and hidden; null keeps no record (previews, tests). */
+    private val seen: SeenPosts? = null,
 ) : Screen {
     var sort by mutableStateOf(sort)
         private set
@@ -48,6 +50,8 @@ class FeedScreen(
     private var generation = 0
     /** The next first-page load is a pull to refresh. */
     private var force = false
+    /** Posts that were on screen before they loaded here, so they offer a hide button. */
+    private val repeats = HashSet<String>()
 
     val label: String
         get() = community?.let { c ->
@@ -68,19 +72,22 @@ class FeedScreen(
         error = null
         job = scope.launch {
             try {
-                val first = after == null
-                val page = service.feed(community, sort, after, refresh = force && first)
-                if (gen != generation) return@launch
-                if (first) {
-                    fetchedAt = page.fetchedAt
-                    notice = page.notice
-                }
-                force = false
-                if (gen != generation) return@launch
-                val seen = posts.mapTo(HashSet()) { it.name }
-                posts.addAll(page.posts.filter { seen.add(it.name) })
-                after = page.after
-                endReached = page.after == null
+                var pages = 0
+                // A first page that's all hidden posts would look empty: keep going a little.
+                do {
+                    val first = after == null
+                    val page = service.feed(community, sort, after, refresh = force && first)
+                    if (gen != generation) return@launch
+                    if (first) {
+                        fetchedAt = page.fetchedAt
+                        notice = page.notice
+                    }
+                    force = false
+                    posts.addAll(fresh(page.posts))
+                    after = page.after
+                    endReached = page.after == null
+                    pages++
+                } while (posts.isEmpty() && !endReached && pages < 5)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -97,8 +104,7 @@ class FeedScreen(
      */
     fun mixIn(extra: List<Post>, spacing: Int) {
         if (loading) return
-        val have = posts.mapTo(HashSet()) { it.name }
-        val add = extra.filter { have.add(it.name) }
+        val add = fresh(extra)
         if (add.isEmpty()) return
         val index = posts.withIndex().associate { (i, p) -> p.name to i }
         val lastShown = listState.layoutInfo.visibleItemsInfo.mapNotNull { index[it.key as? String] }.maxOrNull() ?: -1
@@ -106,6 +112,43 @@ class FeedScreen(
         val merged = interleave(posts.toList(), add, lastShown + 2, spacing)
         // Insert one at a time: replacing the whole list would make the list lose its place.
         merged.forEachIndexed { i, p -> if (p.name !in index) posts.add(i, p) }
+    }
+
+    /** Of [incoming], the posts not already here or hidden, noting which were seen before. */
+    private fun fresh(incoming: List<Post>): List<Post> {
+        val have = posts.mapTo(HashSet()) { it.name }
+        return incoming.filter { have.add(it.name) && seen?.isHidden(it.name) != true }.onEach {
+            if (seen?.wasSeen(it.name) == true) repeats += it.name
+        }
+    }
+
+    /** Whether [post] was on screen in an earlier load. Fixed when it loads, so it doesn't change as you look. */
+    fun isRepeat(post: Post): Boolean = post.name in repeats
+
+    /** Notes posts that have been on screen a moment. */
+    fun markSeen(names: Collection<String>) {
+        seen?.mark(names)
+    }
+
+    fun saveSeen() {
+        seen?.flush()
+    }
+
+    /** Takes [post] out of the feed and keeps it out of later ones. Returns how to undo it. */
+    fun hide(post: Post): () -> Unit {
+        val index = posts.indexOfFirst { it.name == post.name }
+        if (index < 0) return {}
+        val gen = generation
+        seen?.hide(post.name)
+        posts.removeAt(index)
+        // Hiding near the end may leave too little to scroll to the next page.
+        if (posts.size - index < 5) loadMore()
+        return {
+            seen?.unhide(post.name)
+            if (gen == generation && posts.none { it.name == post.name }) {
+                posts.add(index.coerceAtMost(posts.size), post)
+            }
+        }
     }
 
     /** Stops a load in progress, once the screen is gone. */
@@ -121,6 +164,7 @@ class FeedScreen(
         generation++
         job?.cancel()
         posts.clear()
+        repeats.clear()
         after = null
         endReached = false
         loading = false

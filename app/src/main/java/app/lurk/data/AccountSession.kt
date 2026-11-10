@@ -40,6 +40,7 @@ class AccountSession(
     private val scope = MainScope()
     private val profile = store.profileFor(accountId)
     private val seenCommunities = SeenCommunities(context, accountId)
+    private val seenPosts = SeenPosts(context, accountId)
     private val build: Int = context.packageManager.getPackageInfo(context.packageName, 0).let {
         if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode.toInt() else @Suppress("DEPRECATION") it.versionCode
     }
@@ -168,7 +169,7 @@ class AccountSession(
     // --- Navigation ---
 
     fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen =
-        FeedScreen(community, sort, service, scope).also { it.loadMore() }
+        FeedScreen(community, sort, service, scope, seenPosts).also { it.loadMore() }
 
     /** An RSS account: posts only, with comments, users and other pages on Reddit in Chrome. */
     val isRss: Boolean get() = service.kind == ServiceKind.RedditRss

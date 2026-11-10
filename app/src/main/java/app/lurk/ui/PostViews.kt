@@ -89,9 +89,9 @@ val LocalNaming = compositionLocalOf<Naming> { RedditNaming }
 private val CardShape = RoundedCornerShape(24.dp)
 private val MediaShape = RoundedCornerShape(16.dp)
 
-/** A post in a feed: a card; tapping it opens the thread. */
+/** A post in a feed: a card; tapping it opens the thread. [onHide]: offers a hide button. */
 @Composable
-fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers) {
+fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers, onHide: (() -> Unit)? = null) {
     Surface(
         shape = CardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -126,7 +126,7 @@ fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandl
             }
             if (!post.isSelf && post.media == null) LinkPreview(post, on)
             post.media?.let { PostMediaView(post, it, compact = true, on = on) }
-            PostActions(post, actions, on, onComments = { on.openThread(post) })
+            PostActions(post, actions, on, onComments = { on.openThread(post) }, onHide = onHide)
         }
     }
 }
@@ -433,7 +433,10 @@ private fun PictureView(picture: Picture, modifier: Modifier, onClick: () -> Uni
 }
 
 @Composable
-private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onComments: (() -> Unit)?) {
+private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onComments: (() -> Unit)?, onHide: (() -> Unit)? = null) {
+    val hide: @Composable () -> Unit = {
+        if (onHide != null) RoundIcon(LurkIcons.EyeOff, "Hide", MaterialTheme.colorScheme.onSurfaceVariant, onHide)
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -447,6 +450,7 @@ private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onCommen
                 Icon(LurkIcons.External, null, Modifier.padding(start = 6.dp).size(14.dp))
             }
             Spacer(Modifier.weight(1f))
+            hide()
             RoundIcon(LurkIcons.Share, "Share", MaterialTheme.colorScheme.onSurfaceVariant) { on.share(post) }
             return@Row
         }
@@ -460,6 +464,7 @@ private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onCommen
             )
         }
         Spacer(Modifier.weight(1f))
+        hide()
         val saved = actions.saved(post.name, post.saved)
         RoundIcon(
             if (saved) LurkIcons.BookmarkFilled else LurkIcons.Bookmark,
