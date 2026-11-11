@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -220,6 +221,7 @@ private fun AccountContent(
     var addingLemmy by remember { mutableStateOf(false) }
     var addingBluesky by remember { mutableStateOf(false) }
     var rssSetup by remember { mutableStateOf(false) }
+    var tokenSetup by remember { mutableStateOf(false) }
     var addingRss by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     val service = session.service
@@ -594,6 +596,8 @@ private fun AccountContent(
                 onSync = { session.requestSync() },
                 onTestRss = { rssSetup = true }, // public feeds: no Reddit sign-in needed
                 rssTesting = session.rssTesting,
+                onTestToken = { tokenSetup = true },
+                tokenTesting = session.tokenTesting,
                 onClose = { debugOpen = false },
             )
         }
@@ -757,6 +761,19 @@ private fun AccountContent(
                 }
             },
             onCancel = { addingBluesky = false },
+        )
+    }
+
+    if (tokenSetup) {
+        val own = session.loginCookie
+        TokenTestDialog(
+            hasOwnCookie = own != null,
+            onRun = { pasted ->
+                tokenSetup = false
+                val cookie = pasted ?: own
+                if (cookie != null) session.testToken(cookie, if (pasted != null) "a pasted cookie" else "this account's sign-in")
+            },
+            onCancel = { tokenSetup = false },
         )
     }
 
@@ -1155,6 +1172,9 @@ private fun BoxScope.EngineHost(
     /** Checks Reddit's RSS rate limit from this phone, from any account. */
     onTestRss: (() -> Unit)?,
     rssTesting: Boolean,
+    /** Checks whether a Reddit login cookie still gets API access. */
+    onTestToken: () -> Unit,
+    tokenTesting: Boolean,
     onClose: () -> Unit,
 ) {
     if (!open) {
@@ -1179,6 +1199,17 @@ private fun BoxScope.EngineHost(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             ) {
                 Text("Engine debug", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
+                TextButton(onClick = onClose) { Text("Close") }
+            }
+            // The tests: a row of their own that scrolls, so it fits a phone.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            ) {
+                TextButton(onClick = onTestToken, enabled = !tokenTesting) {
+                    Text(if (tokenTesting) "Testing…" else "Test sign-in")
+                }
                 if (onTestRss != null) {
                     TextButton(onClick = onTestRss, enabled = !rssTesting) {
                         Text(if (rssTesting) "Testing…" else "Test RSS")
@@ -1187,8 +1218,6 @@ private fun BoxScope.EngineHost(
                 TextButton(onClick = onSync, enabled = !syncing) {
                     Text(if (syncing) "Syncing…" else "Run sync")
                 }
-                TextButton(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
-                TextButton(onClick = onClose) { Text("Close") }
             }
             if (engineView != null) {
                 AndroidView(

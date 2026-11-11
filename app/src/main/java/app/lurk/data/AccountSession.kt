@@ -395,6 +395,26 @@ class AccountSession(
         }
     }
 
+    /** Engine debug's "Test sign-in" is running. */
+    var tokenTesting by mutableStateOf(false)
+        private set
+
+    /** This account's Reddit login cookie, from signing in on Reddit's site, if it has one. */
+    val loginCookie: String? get() = WebProfiles.loginCookie(browser.webView)
+
+    /** Engine debug: whether a Reddit login cookie still gets API access. See [TokenProbe]. */
+    fun testToken(cookie: String, source: String) {
+        if (tokenTesting) return
+        tokenTesting = true
+        scope.launch {
+            try {
+                TokenProbe.run(service.log, build, cookie, source)
+            } finally {
+                tokenTesting = false
+            }
+        }
+    }
+
     fun requestSync() {
         scope.launch { sync() }
     }

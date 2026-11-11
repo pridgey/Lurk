@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.lurk.data.RssProbe
+import app.lurk.data.TokenProbe
 
 /**
  * Before Engine debug's RSS test: optionally the account's private front-page feed link,
@@ -124,6 +125,68 @@ fun RssLinkDialog(
         },
         confirmButton = {
             Button(onClick = { parsed?.let(onSave) }, enabled = parsed != null) { Text("Sign in") }
+        },
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Before Engine debug's sign-in test: which Reddit login cookie to test. Blank uses the
+ * account's own, from signing in on Reddit's site, when it has one. A pasted cookie is
+ * used once and not kept.
+ */
+@Composable
+fun TokenTestDialog(
+    hasOwnCookie: Boolean,
+    onRun: (cookie: String?) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    val parsed = TokenProbe.parseCookie(text)
+    val blank = text.isBlank()
+
+    AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        onDismissRequest = onCancel,
+        title = { Text("Test sign-in") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Checks whether a Reddit login still gets Lurk posts and comments after RSS ends. " +
+                        "It signs in the way Reddit's own Android app does, which Reddit's terms don't allow, " +
+                        "so a spare account is safest.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (hasOwnCookie) {
+                        "Leave this empty to use this account's sign-in, or paste another account's reddit_session cookie."
+                    } else {
+                        "This account isn't signed in on Reddit's site. On a computer, sign in to reddit.com, open the " +
+                            "browser's developer tools, and copy the reddit_session cookie's value."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("reddit_session cookie") },
+                    singleLine = true,
+                    isError = !blank && parsed == null,
+                    supportingText = {
+                        if (!blank && parsed == null) Text("That doesn't look like a reddit_session cookie.")
+                        else Text("Used for this test only. Never shown in the log.")
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onRun(parsed) }, enabled = if (blank) hasOwnCookie else parsed != null) {
+                Text(if (blank) "Use this account's" else "Run test")
+            }
         },
         dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
     )
