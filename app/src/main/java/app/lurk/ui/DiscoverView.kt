@@ -170,7 +170,7 @@ fun DiscoverView(
         Column(Modifier.fillMaxSize()) {
             SearchField(screen.query, "Search ${noun.plural()} by topic", screen::type, screen::submitSearch, screen::clearSearch)
             if (screen.isSearching) {
-                SearchResults(screen, signedIn, activeLabel, onOpen, onMessage, Modifier.weight(1f))
+                SearchResults(screen, signedIn, activeLabel, onOpen, onMessage, Modifier.weight(1f), joinedElsewhere, onMergeAll)
             } else {
                 if (screen.topics.isNotEmpty()) TopicChips(screen.topics, screen.topic, screen::changeTopic)
                 Text(
@@ -362,6 +362,8 @@ private fun SearchResults(
     onOpen: (String) -> Unit,
     onMessage: (String) -> Unit,
     modifier: Modifier,
+    joinedElsewhere: (String) -> String?,
+    onMergeAll: ((CommunityInfo) -> Unit)?,
 ) {
     val noun = LocalNaming.current.communityNoun
     val list = rememberLazyListState()

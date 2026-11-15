@@ -1,6 +1,8 @@
 package app.lurk.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -171,7 +173,7 @@ private fun CompactThumb(post: Post, cover: String?, on: PostHandlers) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) {
                     if (media is PostMedia.Video) {
-                        Icon(androidx.compose.material.icons.Icons.Default.PlayArrow, null, Modifier.size(12.dp))
+                        Icon(Icons.Default.PlayArrow, null, Modifier.size(12.dp))
                     } else {
                         Icon(badge.first, null, Modifier.size(11.dp))
                     }
@@ -247,7 +249,7 @@ fun GalleryTile(post: Post, actions: Actions, on: PostHandlers) {
                 contentColor = Color.White,
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             ) {
-                Icon(androidx.compose.material.icons.Icons.Default.PlayArrow, "Video", Modifier.padding(5.dp).size(16.dp))
+                Icon(Icons.Default.PlayArrow, "Video", Modifier.padding(5.dp).size(16.dp))
             }
             is PostMedia.Gallery -> Surface(
                 shape = CircleShape,
@@ -458,7 +460,7 @@ private fun LayoutDrawing(layout: PostLayout) {
 @Composable
 fun BudgetCard(read: Int, budget: Int, onKeepGoing: () -> Unit, onSettings: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
-        shape = CardShape,
+        shape = PostCardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
     ) {

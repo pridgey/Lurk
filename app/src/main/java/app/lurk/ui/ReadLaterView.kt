@@ -116,7 +116,7 @@ fun ReadLaterView(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 12.dp, vertical = 5.dp)
-                            .clip(CardShape)
+                            .clip(PostCardShape)
                             .background(color)
                             .padding(horizontal = 28.dp),
                     ) {

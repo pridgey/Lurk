@@ -94,7 +94,7 @@ val LocalShowNsfw = compositionLocalOf { false }
 /** How the active account's site names communities and people. */
 val LocalNaming = compositionLocalOf<Naming> { RedditNaming }
 
-internal val CardShape = RoundedCornerShape(24.dp)
+internal val PostCardShape = RoundedCornerShape(24.dp)
 internal val MediaShape = RoundedCornerShape(16.dp)
 
 /**
@@ -104,12 +104,12 @@ internal val MediaShape = RoundedCornerShape(16.dp)
 @Composable
 fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers, large: Boolean = false) {
     Surface(
-        shape = CardShape,
+        shape = PostCardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = if (large) 8.dp else 12.dp, vertical = if (large) 6.dp else 5.dp)
-            .clip(CardShape)
+            .clip(PostCardShape)
             .clickable { on.openThread(post) },
     ) {
         if (large && post.media != null) {
@@ -657,7 +657,7 @@ fun SkeletonCard() {
     )
     val block = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = pulse)
     Surface(
-        shape = CardShape,
+        shape = PostCardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
     ) {
