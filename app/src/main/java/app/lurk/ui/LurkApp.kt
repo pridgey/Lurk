@@ -349,7 +349,7 @@ private fun AccountContent(
         is DiscoverScreen -> "Discover"
         is GamesScreen -> shortCommunity(screen.community) + " scores"
         is WebScreen -> links.locate(browser.url).label
-        is ReaderScreen -> screen.article?.let { it.site ?: it.host } ?: "Reader"
+        is ReaderScreen -> "Reader"
         is SettingsScreen -> screen.page.title
         is ReadLaterScreen -> "Read later"
     }.let { if (inChrome) "Reddit" else it }
@@ -657,7 +657,7 @@ private fun AccountContent(
                         FeedView(
                             screen, session.actions, handlers,
                             onViewOnWeb = { session.openWeb(screen.webUrl) },
-                            budget = session.prefs.feedBudget,
+                            budget = screen.budget,
                             onBudgetSettings = { openSettings() },
                             onEditMutes = { openSettings(SettingsPage.Mutes) },
                             header = if (!session.isRss && scores == null && quiet == null) null else ({

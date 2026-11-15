@@ -59,7 +59,7 @@ class CommunityIndexTest {
         val hacking = list[0]
         assertEquals("hacking", hacking.name)
         assertEquals("lemmy.dbzer0.com", hacking.host)
-        assertEquals("Hacking", hacking.title)
+        assertNull(hacking.title) // only differs from the name in case
         assertEquals("A comm for hacking Hardware and software tools", hacking.description)
         assertEquals(175, hacking.subscribers)
         assertEquals(25, hacking.posts)

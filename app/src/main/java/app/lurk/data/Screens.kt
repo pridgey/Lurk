@@ -114,6 +114,9 @@ class FeedScreen(
     /** What a slow first load is waiting on, e.g. Reddit's RSS rate limit. */
     val loadingNote: String? get() = service.loadingNote
 
+    /** The feed budget in posts; 0 for none. */
+    val budget: Int get() = hooks.budget()
+
     /** Whether the feed budget has paused this feed. */
     val paused: Boolean get() = budgetCap != null
 

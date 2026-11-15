@@ -533,13 +533,13 @@ private fun Copies(info: CommunityInfo, activeLabel: String, onMergeAll: (() -> 
     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                "On ${all.size} instances",
+                "On ${all.size} instances · people $activeLabel",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            all.take(4).forEachIndexed { i, c ->
+            all.take(3).forEachIndexed { i, c ->
                 val host = c.name.substringAfter('@', "here")
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                     Text(
                         host,
                         style = MaterialTheme.typography.labelMedium,
@@ -572,17 +572,15 @@ private fun Copies(info: CommunityInfo, activeLabel: String, onMergeAll: (() -> 
                     )
                 }
             }
-            if (all.size > 4) {
-                Text("and ${all.size - 4} more", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            if (all.size > 3) {
+                Text("and ${all.size - 3} more", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
             }
-            Text(
-                "Bars show people $activeLabel.",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 8.dp),
-            )
             if (onMergeAll != null) {
-                FilledTonalButton(onClick = onMergeAll, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                FilledTonalButton(
+                    onClick = onMergeAll,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(40.dp),
+                ) {
                     Icon(LurkIcons.Merge, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Join all ${all.size} as one feed")
@@ -669,16 +667,16 @@ private fun CommunityCard(
                         )
                     }
                     elsewhere?.let { JoinedElsewhere(it, Modifier.padding(top = 10.dp)) }
-                    if (info.copies.isNotEmpty()) Copies(info, activeLabel, onMergeAll, Modifier.padding(top = 12.dp))
                     if (info.description.isNotBlank()) {
                         Text(
                             info.description,
                             style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 3,
+                            maxLines = if (info.copies.isEmpty()) 3 else 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 10.dp),
                         )
                     }
+                    if (info.copies.isNotEmpty()) Copies(info, activeLabel, onMergeAll, Modifier.padding(top = 12.dp))
                     Text(
                         peekLabel,
                         style = MaterialTheme.typography.labelLarge,

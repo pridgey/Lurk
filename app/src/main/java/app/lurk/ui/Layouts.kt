@@ -151,7 +151,6 @@ private fun CompactThumb(post: Post, cover: String?, on: PostHandlers) {
         Icon(
             when (media) {
                 null -> LurkIcons.External
-                is PostMedia.Video -> LurkIcons.Pause
                 else -> LurkIcons.Photo
             },
             null,

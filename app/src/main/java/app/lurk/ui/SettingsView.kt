@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -556,6 +557,7 @@ private fun DayChart(days: List<DayStats>, modifier: Modifier) {
                         Box(
                             Modifier
                                 .fillMaxWidth(if (days.size > 40) 1f else 0.62f)
+                                .widthIn(max = 24.dp)
                                 .height((chartHeight.value * share).coerceAtLeast(if (d.read > 0) 3f else 1.5f).dp)
                                 .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                                 .background(if (d.read == 0) grid else barColor),
