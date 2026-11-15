@@ -119,6 +119,12 @@ import app.lurk.data.UpdateState
 import app.lurk.data.Updater
 import androidx.compose.runtime.LaunchedEffect
 import app.lurk.data.WebScreen
+import app.lurk.data.ReaderScreen
+import app.lurk.data.ReadLaterScreen
+import app.lurk.data.SettingsScreen
+import app.lurk.data.SettingsPage
+import app.lurk.data.PostLayout
+import app.lurk.data.layoutKey
 import app.lurk.web.BrowserController
 import app.lurk.web.Scripts
 import android.webkit.WebView
@@ -216,6 +222,7 @@ private fun AccountContent(
     var debugOpen by remember { mutableStateOf(false) }
     var subredditsOpen by remember { mutableStateOf(false) }
     var confirmSignOut by remember { mutableStateOf(false) }
+    var confirmClearLater by remember { mutableStateOf(false) }
     var settingPin by remember { mutableStateOf(false) }
     var confirmRemovePin by remember { mutableStateOf(false) }
     var addingLemmy by remember { mutableStateOf(false) }
@@ -224,6 +231,8 @@ private fun AccountContent(
     var tokenSetup by remember { mutableStateOf(false) }
     var addingRss by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
+    /** The layout sheet: for the feed on screen, or (true) the default for every feed. */
+    var layoutFor by remember { mutableStateOf<Boolean?>(null) }
     val service = session.service
     val links = session.links
     val naming = service.naming
@@ -260,6 +269,14 @@ private fun AccountContent(
     val handlers = remember(session) {
         PostHandlers(
             openThread = { post ->
+                session.stats.recordThread()
+                // Reading a post takes it off the Read later shelf.
+                session.readLater.remove(post.name)?.let { taken ->
+                    scope.launch {
+                        val undo = snackbar.showSnackbar("Taken off Read later", actionLabel = "Undo", duration = androidx.compose.material3.SnackbarDuration.Short)
+                        if (undo == SnackbarResult.ActionPerformed) session.readLater.restore(taken)
+                    }
+                }
                 if (session.webInChrome) session.openWeb(post.shareUrl ?: session.links.thread(post.threadRef))
                 else session.push(session.thread(post.threadRef, post))
             },
@@ -274,9 +291,23 @@ private fun AccountContent(
             openUser = { name -> session.openWeb(session.links.user(name)) },
             openRef = { ref -> if (session.webInChrome) session.openWeb(session.links.thread(ref)) else session.push(session.thread(ref)) },
             openOnWeb = { post -> session.openWeb(session.links.thread(post.threadRef)) },
-            share = { post -> sharePost(context, post, session.links.share(post)) },
+            share = { post -> sharePost(context, post, session.prefs.tidy(session.links.share(post))) },
             openVideo = { post, startMs -> session.openVideo(post, startMs) },
             inlineVideo = InlineVideo(),
+            openArticle = { post -> session.openArticle(post.url, post.title.takeIf { it.isNotBlank() }) },
+            openReader = { post -> session.openReader(post.url, post.title.takeIf { it.isNotBlank() }) },
+            toggleLater = { post ->
+                val added = session.readLater.toggle(post)
+                scope.launch {
+                    val undo = snackbar.showSnackbar(
+                        if (added) "Saved to Read later" else "Taken off Read later",
+                        actionLabel = "Undo",
+                        duration = androidx.compose.material3.SnackbarDuration.Short,
+                    )
+                    if (undo == SnackbarResult.ActionPerformed) session.readLater.toggle(post)
+                }
+            },
+            isLater = { name -> name in session.readLater },
         )
     }
 
@@ -287,12 +318,14 @@ private fun AccountContent(
         is DiscoverScreen -> screen.webUrl
         is GamesScreen -> screen.webUrl
         is WebScreen -> browser.url
+        is ReaderScreen -> screen.article?.url ?: screen.url
+        is SettingsScreen, is ReadLaterScreen -> null
     }
     val webBack = screen is WebScreen && browser.canGoBack
 
     // From a community picked in the bottom bar, Back goes Home before leaving the app.
     val backToHome = session.stack.size == 1 &&
-        ((screen is FeedScreen && screen.community != null) || screen is DiscoverScreen)
+        ((screen is FeedScreen && screen.community != null) || screen is DiscoverScreen || screen is ReadLaterScreen)
     BackHandler(enabled = debugOpen || webBack || session.stack.size > 1 || backToHome) {
         when {
             debugOpen -> debugOpen = false
@@ -306,8 +339,9 @@ private fun AccountContent(
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
     /** "c/linux" rather than "c/linux@lemmy.ml", unless a subscription shares the name. */
     fun shortCommunity(name: String) = naming.community(naming.chip(name, account.communities))
+    val merged = (screen as? FeedScreen)?.community?.let(account::mergedFor)
     val title = when (screen) {
-        is FeedScreen -> screen.community
+        is FeedScreen -> merged?.let { naming.community(it.label) } ?: screen.community
             ?.takeIf { c -> service.fixedFeeds.none { it.community == c } }
             ?.let(::shortCommunity)
             ?: screen.label
@@ -315,15 +349,17 @@ private fun AccountContent(
         is DiscoverScreen -> "Discover"
         is GamesScreen -> shortCommunity(screen.community) + " scores"
         is WebScreen -> links.locate(browser.url).label
+        is ReaderScreen -> screen.article?.let { it.site ?: it.host } ?: "Reader"
+        is SettingsScreen -> screen.page.title
+        is ReadLaterScreen -> "Read later"
     }.let { if (inChrome) "Reddit" else it }
     val titleCommunity = when (screen) {
-        is FeedScreen -> screen.community?.let { c ->
+        is FeedScreen -> merged?.label ?: screen.community?.let { c ->
             service.fixedFeeds.firstOrNull { it.community == c }?.label?.lowercase() ?: c
         }
         is ThreadScreen -> screen.post?.community
-        is DiscoverScreen -> null
         is GamesScreen -> screen.community
-        is WebScreen -> null
+        is DiscoverScreen, is WebScreen, is ReaderScreen, is SettingsScreen, is ReadLaterScreen -> null
     }?.takeIf { !inChrome }
 
     val selectedFeed: String? = when (screen) {
@@ -332,6 +368,8 @@ private fun AccountContent(
         is DiscoverScreen -> DISCOVER_KEY
         is GamesScreen -> screen.community.lowercase()
         is WebScreen -> links.locate(browser.url).let { if (it.isHome) HOME_KEY else it.community }
+        is ReadLaterScreen -> LATER_KEY
+        is ReaderScreen, is SettingsScreen -> null
     }
     // Tapping the title on a post (or a community's web page) opens that community's feed.
     val titleTarget: String? = when (screen) {
@@ -341,6 +379,7 @@ private fun AccountContent(
         // Tapping the title goes to the community's posts.
         is GamesScreen -> screen.community
         is WebScreen -> links.locate(browser.url).community
+        is ReaderScreen, is SettingsScreen, is ReadLaterScreen -> null
     }?.takeIf { !inChrome }
 
     fun toggleSubscription(community: String) {
@@ -354,6 +393,32 @@ private fun AccountContent(
                 val undo = snackbar.showSnackbar("Unsubscribed from $label", actionLabel = "Undo")
                 if (undo == SnackbarResult.ActionPerformed) session.setSubscribed(community, true)
             }
+        }
+    }
+
+    fun openSettings(page: SettingsPage = SettingsPage.Main) = session.push(session.settings(page))
+
+    layoutFor?.let { forDefault ->
+        val feed = session.current as? FeedScreen
+        if (!forDefault && feed == null) {
+            layoutFor = null
+        } else {
+            LayoutSheet(
+                current = if (forDefault) session.prefs.defaultLayout else feed!!.layout,
+                feedName = if (forDefault) "every feed without its own" else title,
+                onPick = { layout ->
+                    if (forDefault) {
+                        session.prefs.changeDefaultLayout(layout)
+                        // Feeds without a layout of their own follow the new default.
+                        session.stack.filterIsInstance<FeedScreen>()
+                            .filter { account.layouts[layoutKey(it.community)] == null }
+                            .forEach { it.useLayout(layout) }
+                    } else {
+                        feed!!.changeLayout(layout)
+                    }
+                },
+                onDismiss = { layoutFor = null },
+            )
         }
     }
 
@@ -391,6 +456,7 @@ private fun AccountContent(
                 removePin = { confirmRemovePin = true },
                 signOut = { confirmSignOut = true },
                 setStandardReddit = { on -> store.changeStandardReddit(on) },
+                openSettings = { openSettings() },
                 setHideSeen = { on ->
                     store.update(account.id) { it.copy(hideSeen = on) }
                     // Show the change on the feed you're on.
@@ -482,6 +548,13 @@ private fun AccountContent(
                             onClick = { toggleSubscription(community) },
                         )
                     }
+                    if (screen is ReaderScreen) {
+                        IconButton(onClick = { session.openReaderOriginal(screen) }) {
+                            Icon(LurkIcons.External, contentDescription = "Open the original")
+                        }
+                        return@TopAppBar
+                    }
+                    if (screen is SettingsScreen) return@TopAppBar
                     if (!inChrome) when (screen) {
                         is FeedScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.feedSorts, { it.label }) { screen.changeSort(it) }
@@ -492,7 +565,7 @@ private fun AccountContent(
                         is DiscoverScreen -> screen.sort?.let { sort ->
                             SortMenu(sort.label, service.discoverSorts, { it.label }) { screen.changeSort(it) }
                         }
-                        is GamesScreen, is WebScreen -> Unit
+                        else -> Unit
                     }
                     AccountButton(
                         current = account,
@@ -508,15 +581,22 @@ private fun AccountContent(
                                 is DiscoverScreen -> screen.refresh()
                                 is GamesScreen -> screen.load(refresh = true)
                                 is WebScreen -> browser.reload()
+                                is ReaderScreen -> screen.load()
+                                is SettingsScreen, is ReadLaterScreen -> Unit
                             }
                         },
+                        onLayout = (screen as? FeedScreen)?.takeIf { !inChrome && !(session.isRss && !account.signedIn) }?.let { f ->
+                            { layoutFor = false }
+                        },
+                        layoutLabel = (screen as? FeedScreen)?.layout?.label,
+                        onSettings = { openSettings() },
                         onSync = { session.requestSync() },
                         onInbox = links.inbox?.let { inbox -> { session.openWeb(inbox) } },
-                        onViewOnWeb = if (screen is WebScreen) null else ({ currentUrl?.let(session::openWeb) }),
+                        onViewOnWeb = if (screen is WebScreen || currentUrl == null) null else ({ currentUrl.let(session::openWeb) }),
                         onScores = (screen as? FeedScreen)?.community
                             ?.takeIf { !inChrome && session.canShowGames(it) }
                             ?.let { community -> { session.push(session.games(community)) } },
-                        onOpenOutside = { currentUrl?.let { openExternal(context, Uri.parse(it)) } },
+                        onOpenOutside = { currentUrl?.let { openExternal(context, Uri.parse(session.prefs.tidy(it))) } },
                         onDebug = { debugOpen = true },
                         update = updater?.state,
                         onUpdates = updater?.let { u ->
@@ -530,8 +610,12 @@ private fun AccountContent(
             )
         },
         bottomBar = {
+            // Reading an article or changing settings gets the whole screen.
+            if (screen is ReaderScreen || screen is SettingsScreen) return@Scaffold
             SubredditBar(
                 account = account,
+                laterCount = session.readLater.items.size,
+                onLater = { if (session.isRss && !account.signedIn) session.signIn() else session.reset(ReadLaterScreen()) },
                 naming = naming,
                 fixedFeeds = service.fixedFeeds,
                 selected = selectedFeed,
@@ -565,12 +649,21 @@ private fun AccountContent(
                 when (screen) {
                     is FeedScreen -> {
                         val scores = screen.community?.takeIf { session.canShowGames(it) }
+                        session.activity.version // a feed's first page can show it's gone quiet
+                        val quiet = screen.community
+                            ?.takeIf { c -> !service.isMixed(c) && !session.isMerged(c) && session.isSubscribed(c) }
+                            ?.let { c -> session.activity.of(c) }
+                            ?.takeIf { app.lurk.data.CommunityActivity.health(it) == app.lurk.data.Health.Quiet }
                         FeedView(
                             screen, session.actions, handlers,
                             onViewOnWeb = { session.openWeb(screen.webUrl) },
-                            header = if (!session.isRss && scores == null) null else ({
+                            budget = session.prefs.feedBudget,
+                            onBudgetSettings = { openSettings() },
+                            onEditMutes = { openSettings(SettingsPage.Mutes) },
+                            header = if (!session.isRss && scores == null && quiet == null) null else ({
                                 Column {
                                     if (session.isRss) RssFeedHeader(screen)
+                                    if (quiet != null) QuietBanner(quiet.newestPost) { openSettings(SettingsPage.Health) }
                                     if (scores != null) ScoreboardBanner(screen) { session.push(session.games(scores)) }
                                 }
                             }),
@@ -583,9 +676,69 @@ private fun AccountContent(
                         activeLabel = if (service.kind == ServiceKind.Reddit) "online" else "active this week",
                         onOpen = { name -> session.push(session.feed(name)) },
                         onMessage = onMessage,
+                        joinedElsewhere = { name -> session.joinedElsewhere(name)?.label },
+                        onMergeAll = if (service.kind != ServiceKind.Lemmy) null else ({ info ->
+                            val label = info.name.substringBefore('@')
+                            session.merge(label, listOf(info.name) + info.copies.map { it.name })
+                            onMessage("Joined ${info.copies.size + 1} copies as ${naming.community(label)}")
+                        }),
                     )
                     is GamesScreen -> GamesView(screen, handlers)
                     is WebScreen -> WebPage(screen, browser)
+                    is ReaderScreen -> ReaderView(
+                        screen,
+                        onLink = { url -> session.openLink(url) },
+                        onImage = { url -> session.viewingPreview = null; session.viewingImage = url },
+                        onOriginal = { session.openReaderOriginal(screen) },
+                    )
+                    is ReadLaterScreen -> ReadLaterView(
+                        screen, session.readLater, session.actions, handlers,
+                        onOpen = { item -> handlers.openThread(item.post) },
+                        onRemoved = { item ->
+                            session.readLater.remove(item.post.name)
+                            scope.launch {
+                                val undo = snackbar.showSnackbar("Taken off Read later", actionLabel = "Undo", duration = androidx.compose.material3.SnackbarDuration.Short)
+                                if (undo == SnackbarResult.ActionPerformed) session.readLater.restore(item)
+                            }
+                        },
+                        onClear = { confirmClearLater = true },
+                    )
+                    is SettingsScreen -> SettingsView(
+                        screen,
+                        SettingsState(
+                            account = account,
+                            prefs = session.prefs,
+                            stats = session.stats,
+                            activity = session.activity,
+                            health = session.health,
+                            multiProfile = store.multiProfile,
+                            standardReddit = store.standardReddit,
+                            build = remember { buildNumber(context) },
+                        ),
+                        SettingsActions(
+                            open = { page -> openSettings(page) },
+                            setNsfw = { on -> store.update(account.id) { it.copy(showNsfw = on) } },
+                            setHideSeen = { on -> store.update(account.id) { it.copy(hideSeen = on) } },
+                            setPin = { settingPin = true },
+                            removePin = { confirmRemovePin = true },
+                            setMutes = { rules -> session.setMutes(rules) },
+                            pickDefaultLayout = { layoutFor = true },
+                            setStandardReddit = { on -> store.changeStandardReddit(on) },
+                            checkUpdates = updater?.let { u -> { if (u.available == null) u.startCheck(); onUpdates() } },
+                            openDebug = { debugOpen = true },
+                            openCommunity = { name -> session.push(session.feed(name)) },
+                            switchCommunity = { from, to ->
+                                session.setSubscribed(to, true)
+                                session.setSubscribed(from, false)
+                                onMessage("Switched to ${naming.community(to)}")
+                            },
+                            merge = { label, members ->
+                                session.merge(label, members)
+                                onMessage("${naming.community(label)} now reads ${members.size} copies")
+                            },
+                            unmerge = { key -> session.unmerge(key) },
+                        ),
+                    )
                 }
             }
             EngineHost(
@@ -816,6 +969,22 @@ private fun AccountContent(
         )
     }
 
+    if (confirmClearLater) {
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            onDismissRequest = { confirmClearLater = false },
+            title = { Text("Clear Read later?") },
+            text = { Text("All ${session.readLater.items.size} posts come off the shelf. They're still on the site.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearLater = false
+                    session.readLater.clear()
+                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClearLater = false }) { Text("Cancel") } },
+        )
+    }
+
     if (confirmSignOut) {
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -837,6 +1006,13 @@ private fun AccountContent(
 
 private const val HOME_KEY = ":home" // can't clash with a community name
 private const val DISCOVER_KEY = ":discover"
+private const val LATER_KEY = ":later"
+
+/** The installed build number, for Settings. */
+private fun buildNumber(context: Context): String? = runCatching {
+    val info = context.packageManager.getPackageInfo(context.packageName, 0)
+    (if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()).toString()
+}.getOrNull()
 
 /**
  * The visible WebView, for a [WebScreen]. Several web screens can be on the stack but
@@ -957,6 +1133,10 @@ private fun OverflowMenu(
     onScores: (() -> Unit)?,
     onOpenOutside: () -> Unit,
     onDebug: () -> Unit,
+    /** Opens the layout sheet for the feed on screen; null elsewhere. */
+    onLayout: (() -> Unit)? = null,
+    layoutLabel: String? = null,
+    onSettings: () -> Unit = {},
     update: UpdateState?,
     /** Null where updates aren't offered (previews). */
     onUpdates: (() -> Unit)?,
@@ -990,6 +1170,14 @@ private fun OverflowMenu(
                 MenuDivider()
             }
             DropdownMenuItem(text = { Text("Refresh") }, leadingIcon = { MenuIcon(LurkIcons.Refresh) }, onClick = { open = false; onRefresh() })
+            if (onLayout != null) {
+                DropdownMenuItem(
+                    text = { Text("Layout") },
+                    trailingIcon = layoutLabel?.let { { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+                    leadingIcon = { MenuIcon(LurkIcons.Layout) },
+                    onClick = { open = false; onLayout() },
+                )
+            }
             if (onScores != null) {
                 DropdownMenuItem(text = { Text("Scoreboard") }, leadingIcon = { MenuIcon(LurkIcons.Scores) }, onClick = { open = false; onScores() })
             }
@@ -1010,6 +1198,7 @@ private fun OverflowMenu(
             if (onUpdates != null && !updateWaiting) {
                 DropdownMenuItem(text = { Text("Check for updates") }, leadingIcon = { MenuIcon(LurkIcons.Download) }, onClick = { open = false; onUpdates() })
             }
+            DropdownMenuItem(text = { Text("Settings") }, leadingIcon = { MenuIcon(LurkIcons.Settings) }, onClick = { open = false; onSettings() })
             DropdownMenuItem(text = { Text("Engine debug") }, leadingIcon = { MenuIcon(LurkIcons.Terminal) }, onClick = { open = false; onDebug() })
         }
     }
@@ -1028,6 +1217,9 @@ private fun MenuDivider() {
 @Composable
 private fun SubredditBar(
     account: Account,
+    /** Posts on the Read later shelf; its chip shows while there are any. */
+    laterCount: Int,
+    onLater: () -> Unit,
     naming: Naming,
     fixedFeeds: List<FixedFeed>,
     /** Lowercase community name, [HOME_KEY], or null. */
@@ -1086,6 +1278,11 @@ private fun SubredditBar(
                 item(key = "fixed:discover") {
                     BarChip("Discover", selected == DISCOVER_KEY, onDiscover, icon = LurkIcons.Compass)
                 }
+                if (laterCount > 0 || selected == LATER_KEY) {
+                    item(key = "fixed:later") {
+                        BarChip("Later", selected == LATER_KEY, onLater, icon = LurkIcons.Clock, count = laterCount)
+                    }
+                }
                 item(key = "divider") {
                     Box(
                         Modifier
@@ -1106,7 +1303,12 @@ private fun SubredditBar(
                         BarChip("Loading subscriptions…", false, {})
                     }
                 }
-                items(account.communities, key = { "sub:" + it.lowercase() }) { name ->
+                items(account.merged, key = { "merged:" + it.key }) { m ->
+                    BarChip(m.label, selected == m.key.lowercase(), { onSubreddit(m.key) }, icon = LurkIcons.Merge)
+                }
+                // Copies read through a merged community show once, as it.
+                val inMerged = account.merged.flatMapTo(HashSet()) { m -> m.members.map { it.lowercase() } }
+                items(account.communities.filter { it.lowercase() !in inMerged }, key = { "sub:" + it.lowercase() }) { name ->
                     BarChip(naming.chip(name, account.communities), selected == name.lowercase(), { onSubreddit(name) }, avatar = naming.label(name))
                 }
             }
@@ -1124,6 +1326,8 @@ private fun BarChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     /** Shows this name's avatar before the label. */
     avatar: String? = null,
+    /** A number after the label, e.g. how many posts wait in Read later. */
+    count: Int = 0,
 ) {
     val container = when {
         selected -> MaterialTheme.colorScheme.inverseSurface
@@ -1152,6 +1356,20 @@ private fun BarChip(
             }
             if (leading) Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            if (count > 0) {
+                Surface(
+                    shape = CircleShape,
+                    color = if (selected) content.copy(alpha = 0.18f) else MaterialTheme.colorScheme.primary,
+                    contentColor = if (selected) content else MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(start = 6.dp),
+                ) {
+                    Text(
+                        if (count > 99) "99+" else "$count",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+            }
         }
     }
 }

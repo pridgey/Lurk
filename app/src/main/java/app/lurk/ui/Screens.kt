@@ -1,5 +1,18 @@
 package app.lurk.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.items as gridItems
+import app.lurk.data.PostLayout
+import app.lurk.data.ReadingSession
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -78,14 +91,24 @@ fun FeedView(
     onViewOnWeb: () -> Unit,
     /** Shown above the posts, e.g. where an RSS Home's posts come from. */
     header: (@Composable () -> Unit)? = null,
+    /** The feed budget in posts (0 for none), for its card. */
+    budget: Int = 0,
+    onBudgetSettings: () -> Unit = {},
+    onEditMutes: () -> Unit = {},
 ) {
+    val gallery = screen.layout == PostLayout.Gallery
     // Load the next page when the list gets near its end, and again after a load that
     // left it there (one whose posts were mostly seen or already shown).
-    LaunchedEffect(screen) {
+    LaunchedEffect(screen, gallery) {
         snapshotFlow {
-            val info = screen.listState.layoutInfo
-            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            info.totalItemsCount > 0 && last >= info.totalItemsCount - 5 && !screen.loading
+            val (last, total) = if (gallery) {
+                val info = screen.gridState.layoutInfo
+                (info.visibleItemsInfo.lastOrNull()?.index ?: 0) to info.totalItemsCount
+            } else {
+                val info = screen.listState.layoutInfo
+                (info.visibleItemsInfo.lastOrNull()?.index ?: 0) to info.totalItemsCount
+            }
+            total > 0 && last >= total - 5 && !screen.loading
         }
             .distinctUntilChanged()
             .filter { it }
@@ -93,20 +116,31 @@ fun FeedView(
     }
 
     // Note posts that stay at least half on screen for a second, so later loads can leave them out.
-    LaunchedEffect(screen) {
+    LaunchedEffect(screen, gallery) {
         val since = HashMap<String, Long>()
         try {
             while (true) {
                 delay(500)
-                val info = screen.listState.layoutInfo
                 val names = screen.posts.mapTo(HashSet()) { it.name }
-                val viewport = info.viewportEndOffset - info.viewportStartOffset
-                val shown = info.visibleItemsInfo.mapNotNull { item ->
-                    val name = (item.key as? String)?.takeIf { it in names } ?: return@mapNotNull null
-                    val top = maxOf(item.offset, info.viewportStartOffset)
-                    val bottom = minOf(item.offset + item.size, info.viewportEndOffset)
-                    name.takeIf { bottom - top >= minOf(item.size, viewport) / 2 }
-                }.toSet()
+                val shown = if (gallery) {
+                    val info = screen.gridState.layoutInfo
+                    val viewport = info.viewportEndOffset - info.viewportStartOffset
+                    info.visibleItemsInfo.mapNotNull { item ->
+                        val name = (item.key as? String)?.takeIf { it in names } ?: return@mapNotNull null
+                        val top = maxOf(item.offset.y, info.viewportStartOffset)
+                        val bottom = minOf(item.offset.y + item.size.height, info.viewportEndOffset)
+                        name.takeIf { bottom - top >= minOf(item.size.height, viewport) / 2 }
+                    }.toSet()
+                } else {
+                    val info = screen.listState.layoutInfo
+                    val viewport = info.viewportEndOffset - info.viewportStartOffset
+                    info.visibleItemsInfo.mapNotNull { item ->
+                        val name = (item.key as? String)?.takeIf { it in names } ?: return@mapNotNull null
+                        val top = maxOf(item.offset, info.viewportStartOffset)
+                        val bottom = minOf(item.offset + item.size, info.viewportEndOffset)
+                        name.takeIf { bottom - top >= minOf(item.size, viewport) / 2 }
+                    }.toSet()
+                }
                 val now = System.currentTimeMillis()
                 since.keys.retainAll(shown)
                 shown.forEach { since.getOrPut(it) { now } }
@@ -118,19 +152,30 @@ fun FeedView(
         }
     }
 
+    val posts = screen.shown
+    val mutedCount = screen.muted.size
+    val banner: (@Composable () -> Unit)? = if (mutedCount == 0) null else ({
+        MutedBanner(mutedCount, screen.showMuted, onToggle = { screen.showMuted = !screen.showMuted }, onManage = onEditMutes)
+    })
+
     PullToRefreshBox(
         // The skeleton cards show the first load; the spinner is for pulls.
         isRefreshing = false,
         onRefresh = { screen.refresh() },
         modifier = Modifier.fillMaxSize(),
     ) {
-        if (screen.posts.isEmpty()) {
+        if (posts.isEmpty()) {
             // A list even when empty, so there's something to pull on.
             LazyColumn(Modifier.fillMaxSize()) {
                 header?.let { item(key = "header") { it() } }
+                banner?.let { item(key = "muted") { it() } }
                 item {
                     val error = screen.error
                     when {
+                        screen.paused -> BudgetCard(
+                            ReadingSession.read, budget, onKeepGoing = { screen.keepGoing() }, onSettings = onBudgetSettings,
+                            modifier = Modifier.padding(top = 24.dp),
+                        )
                         error != null -> EmptyState(
                             icon = LurkIcons.Alert,
                             title = "Couldn't load posts",
@@ -146,6 +191,12 @@ fun FeedView(
                             body = "Posts you've seen are hidden. Pull down to check for new ones.",
                             modifier = Modifier.padding(top = 48.dp),
                         )
+                        !screen.loading && mutedCount > 0 -> EmptyState(
+                            icon = LurkIcons.MuteWords,
+                            title = "Everything here is muted",
+                            body = "Muted words hid every post so far.",
+                            modifier = Modifier.padding(top = 48.dp),
+                        )
                         !screen.loading -> EmptyState(
                             icon = LurkIcons.Empty,
                             title = "Nothing here yet",
@@ -154,7 +205,7 @@ fun FeedView(
                         )
                     }
                 }
-                if (screen.loading && screen.error == null) {
+                if (screen.loading && screen.error == null && !screen.paused) {
                     screen.loadingNote?.let { note ->
                         item(key = "waiting") {
                             Text(
@@ -172,23 +223,65 @@ fun FeedView(
             }
             return@PullToRefreshBox
         }
+        val footer: @Composable () -> Unit = {
+            when {
+                screen.paused -> BudgetCard(ReadingSession.read, budget, onKeepGoing = { screen.keepGoing() }, onSettings = onBudgetSettings)
+                screen.error != null -> Notice(screen.error!!, "Try again", { screen.loadMore() }, Modifier.fillMaxWidth())
+                screen.loading -> if (gallery) GallerySkeleton() else SkeletonCard()
+                screen.endReached -> Notice("That's everything.", modifier = Modifier.fillMaxWidth())
+            }
+        }
+        if (gallery) {
+            LazyVerticalStaggeredGrid(
+                columns = StaggeredGridCells.Adaptive(160.dp),
+                state = screen.gridState,
+                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 12.dp),
+                verticalItemSpacing = 8.dp,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                header?.let { item(key = "header", span = StaggeredGridItemSpan.FullLine) { it() } }
+                banner?.let { item(key = "muted", span = StaggeredGridItemSpan.FullLine) { it() } }
+                gridItems(posts, key = { it.name }) { post -> GalleryTile(post, actions, on) }
+                item(key = "footer", span = StaggeredGridItemSpan.FullLine) { footer() }
+            }
+            return@PullToRefreshBox
+        }
         LazyColumn(
             state = screen.listState,
             contentPadding = PaddingValues(top = 6.dp, bottom = 12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             header?.let { item(key = "header") { it() } }
-            items(screen.posts, key = { it.name }) { post ->
-                PostCard(post, screen.showsCommunity, actions, on)
-            }
-            item(key = "footer") {
-                when {
-                    screen.error != null -> Notice(screen.error!!, "Try again", { screen.loadMore() }, Modifier.fillMaxWidth())
-                    screen.loading -> SkeletonCard()
-                    screen.endReached -> Notice("That's everything.", modifier = Modifier.fillMaxWidth())
+            banner?.let { item(key = "muted") { it() } }
+            items(posts, key = { it.name }) { post ->
+                Column {
+                    screen.muted[post.name]?.let { MutedLabel(it) }
+                    when (screen.layout) {
+                        PostLayout.Compact -> CompactPostRow(post, screen.showsCommunity, actions, on)
+                        PostLayout.Large -> PostCard(post, screen.showsCommunity, actions, on, large = true)
+                        else -> PostCard(post, screen.showsCommunity, actions, on)
+                    }
                 }
             }
+            item(key = "footer") { footer() }
         }
+    }
+}
+
+/** Two pulsing tiles while the gallery loads more. */
+@Composable
+private fun GallerySkeleton() {
+    val pulse by rememberInfiniteTransition(label = "skeleton").animateFloat(
+        initialValue = 0.45f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse",
+    )
+    val block = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = pulse)
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.weight(1f).height(180.dp).clip(RoundedCornerShape(18.dp)).background(block))
+        Box(Modifier.weight(1f).height(140.dp).clip(RoundedCornerShape(18.dp)).background(block))
     }
 }
 

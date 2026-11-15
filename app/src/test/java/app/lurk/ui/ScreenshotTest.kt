@@ -243,4 +243,158 @@ class ScreenshotTest {
             app.lurk.data.RedditAccess.retry()
         }
     }
+
+    // --- Layouts, budget, mutes ---
+
+    private fun laidOut(s: AccountSession, layout: app.lurk.data.PostLayout) = feed(s, null).also { it.useLayout(layout) }
+
+    @Test fun feedCompactLight() = shoot("feed-compact", dark = false) { it.reset(laidOut(it, app.lurk.data.PostLayout.Compact)) }
+    @Test fun feedCompactDark() = shoot("feed-compact", dark = true) { it.reset(laidOut(it, app.lurk.data.PostLayout.Compact)) }
+    @Test fun feedLargeLight() = shoot("feed-large", dark = false) { it.reset(feed(it, null, from = 1).also { f -> f.useLayout(app.lurk.data.PostLayout.Large) }) }
+    @Test fun feedGalleryLight() = shoot("feed-gallery", dark = false) { it.reset(laidOut(it, app.lurk.data.PostLayout.Gallery)) }
+    @Test fun feedGalleryDark() = shoot("feed-gallery", dark = true) { it.reset(laidOut(it, app.lurk.data.PostLayout.Gallery)) }
+
+    @Test fun feedMutedLight() = shoot("feed-muted", dark = false) {
+        it.reset(feed(it, null).also { f -> f.muted["t3_a3"] = "compose"; f.muted["t3_a5"] = "kotlin" })
+    }
+    @Test fun feedMutedShownLight() = shoot("feed-muted-shown", dark = false) {
+        it.reset(feed(it, null).also { f -> f.muted["t3_a1"] = "weekly"; f.showMuted = true })
+    }
+
+    @Test fun budgetLight() = budget(dark = false)
+    @Test fun budgetDark() = budget(dark = true)
+    private fun budget(dark: Boolean) {
+        app.lurk.data.ReadingSession.restart()
+        app.lurk.data.ReadingSession.note(52)
+        try {
+            shoot("budget", dark) { s ->
+                s.reset(FeedScreen(null, RedditSorts.feed.first(), s.service, kotlinx.coroutines.MainScope(), app.lurk.data.FeedHooks(budget = { 50 })).also {
+                    it.posts.addAll(posts)
+                })
+            }
+        } finally {
+            app.lurk.data.ReadingSession.restart()
+        }
+    }
+
+    // --- Read later ---
+
+    @Test fun readLaterLight() = shoot("read-later", dark = false) { s ->
+        s.readLater.clear()
+        posts.take(3).reversed().forEach { s.readLater.add(it) }
+        s.reset(app.lurk.data.ReadLaterScreen())
+    }
+    @Test fun readLaterEmptyDark() = shoot("read-later-empty", dark = true) { s ->
+        s.readLater.clear()
+        s.reset(app.lurk.data.ReadLaterScreen())
+    }
+
+    // --- Reader view ---
+
+    private val article = app.lurk.data.Article(
+        url = "https://www.example.org/2026/11/rivers-return",
+        title = "The rivers that came back",
+        byline = "Maya Okafor",
+        site = "The Field Journal",
+        published = "2026-11-02T09:00:00Z",
+        words = 1840,
+        blocks = listOf(
+            app.lurk.data.ArticleBlock.Paragraph("When the last dam on the Elwha came down, few people expected salmon to return within a decade. They were back in <b>three years</b>."),
+            app.lurk.data.ArticleBlock.Paragraph("Ecologists now call it the fastest recovery of its kind, and other towns <a href=\"https://example.org\">are paying attention</a>."),
+            app.lurk.data.ArticleBlock.Heading(2, "What changed"),
+            app.lurk.data.ArticleBlock.ListItem("Sediment that had piled up for a century washed down to the coast.", false, 1, 0),
+            app.lurk.data.ArticleBlock.ListItem("Cold water reached spawning grounds again.", false, 2, 0),
+            app.lurk.data.ArticleBlock.Quote("We didn't restore the river. We got out of its way."),
+            app.lurk.data.ArticleBlock.Code("flow = basin.mean(axis=0)"),
+            app.lurk.data.ArticleBlock.Paragraph("The next test is larger, and the stakes are higher."),
+        ),
+    )
+
+    @Test fun readerLight() = shoot("reader", dark = false) { s ->
+        s.reset(app.lurk.data.ReaderScreen(article.url, null, app.lurk.data.ArticleReader(context), kotlinx.coroutines.MainScope()).also { it.showForPreview(article) })
+    }
+    @Test fun readerDark() = shoot("reader", dark = true) { s ->
+        s.reset(app.lurk.data.ReaderScreen(article.url, null, app.lurk.data.ArticleReader(context), kotlinx.coroutines.MainScope()).also { it.showForPreview(article) })
+    }
+    @Test fun readerLoadingLight() = shoot("reader-loading", dark = false) { s ->
+        s.reset(app.lurk.data.ReaderScreen(article.url, "Sunrise over the Dolomites after a 4am hike", app.lurk.data.ArticleReader(context), kotlinx.coroutines.MainScope()))
+    }
+
+    // --- Settings ---
+
+    @Test fun settingsLight() = shoot("settings", dark = false) { s ->
+        s.stats.clear()
+        val today = java.time.LocalDate.now()
+        (0 until 7).forEach { back -> s.stats.recordRead(List(10 + back * 7 % 23) { "r/pics" }, today.minusDays(back.toLong())) }
+        s.reset(s.settings())
+    }
+    @Test fun settingsDark() = shoot("settings", dark = true) { s -> s.reset(s.settings()) }
+    @Test fun settingsLemmyLight() = shoot("settings-lemmy", dark = false, ::lemmySession) { s -> s.reset(s.settings()) }
+
+    @Test fun mutesLight() = shoot("mutes", dark = false) { s ->
+        s.setMutes(listOf("spoilers", "election", "/\\bep(isode)? ?\\d+/"))
+        s.reset(s.settings(app.lurk.data.SettingsPage.Mutes))
+    }
+    @Test fun mutesEmptyDark() = shoot("mutes-empty", dark = true) { s ->
+        s.setMutes(emptyList())
+        s.reset(s.settings(app.lurk.data.SettingsPage.Mutes))
+    }
+
+    private fun sampleStats(s: AccountSession) {
+        s.stats.clear()
+        val today = java.time.LocalDate.now()
+        val shape = listOf(12, 30, 18, 44, 26, 8, 0, 35, 52, 21, 17, 40, 63, 28, 14, 33, 47, 22, 9, 38, 55, 31, 26, 19, 42, 37, 12, 29, 48, 24)
+        shape.forEachIndexed { back, n ->
+            val day = today.minusDays(back.toLong())
+            val names = listOf("r/pics", "r/androiddev", "r/Kotlin", "r/EarthPorn", "c/linux@lemmy.ml", "r/science")
+            s.stats.recordRead(List(n) { names[(it * 7 + back) % names.size] }, day)
+            s.stats.recordHidden(n / 3, n / 10, day)
+            s.stats.recordTime(n * 40_000L, day)
+            repeat(n / 6) { s.stats.recordThread(day) }
+        }
+    }
+
+    @Test fun statsLight() = shoot("stats", dark = false) { s -> sampleStats(s); s.reset(s.settings(app.lurk.data.SettingsPage.Stats)) }
+    @Test fun statsDark() = shoot("stats", dark = true) { s -> sampleStats(s); s.reset(s.settings(app.lurk.data.SettingsPage.Stats)) }
+
+    @Test fun healthLight() = shoot("health", dark = false) { s ->
+        val now = System.currentTimeMillis() / 1000
+        fun p(c: String, ago: Long) = posts[0].copy(name = "h$c$ago", community = c, stickied = false, createdUtc = now - ago)
+        s.activity.note("science", listOf(p("science", 80L * 24 * 3600)))
+        s.activity.note(null, listOf(p("pics", 3600), p("androiddev", 7200), p("Kotlin", 2L * 24 * 3600)))
+        s.reset(s.settings(app.lurk.data.SettingsPage.Health))
+    }
+
+    @Test fun mergedLight() = shoot("merged", dark = false, ::lemmySession) { s ->
+        s.merge("linux", listOf("linux@lemmy.ml", "linux@lemmy.world", "linux@programming.dev"))
+        s.reset(s.settings(app.lurk.data.SettingsPage.Merged))
+    }
+
+    // A merged community's feed, with its chip in the bottom bar.
+    @Test fun mergedFeedLight() = shoot("merged-feed", dark = false, ::lemmySession) { s ->
+        val key = s.merge("linux", listOf("linux@lemmy.ml", "linux@lemmy.world"))
+        s.reset(FeedScreen(key, s.service.feedSorts.first(), s.service, kotlinx.coroutines.MainScope()).also {
+            it.posts.addAll(posts.drop(2).mapIndexed { i, p -> p.copy(name = "m" + p.id, community = if (i % 2 == 0) "linux@lemmy.ml" else "linux@lemmy.world") })
+        })
+    }
+
+    // Discover with a community's copies on other instances, and one joined on another account.
+    private fun discoverCopies(s: AccountSession) = s.discover().also { d ->
+        fun c(name: String, active: Int, members: Int) =
+            app.lurk.data.CommunityInfo(name, null, "", members, active, null, null, over18 = false, subscribed = false)
+        d.deck.addAll(
+            listOf(
+                app.lurk.data.CommunityInfo(
+                    "selfhosted@lemmy.world", "Self-hosting", "Run your own services: home servers, homelabs and the software that makes them hum.",
+                    48_000, 6_200, null, null, over18 = false, subscribed = false, posts = 9_400,
+                    copies = listOf(c("selfhosted@lemmy.ml", 2_100, 19_000), c("selfhosted@programming.dev", 640, 5_400)),
+                ),
+                c("woodworking@lemmy.ml", 900, 4_200),
+            ),
+        )
+        d.peeks["selfhosted@lemmy.world"] = app.lurk.data.Peek.Loaded(posts.take(2))
+    }
+
+    @Test fun discoverCopiesLight() = shoot("discover-copies", dark = false, ::lemmySession) { it.reset(discoverCopies(it)) }
+    @Test fun discoverCopiesDark() = shoot("discover-copies", dark = true, ::lemmySession) { it.reset(discoverCopies(it)) }
 }

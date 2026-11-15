@@ -135,6 +135,76 @@ object LurkIcons {
         "M15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z",
     )
 
+    val Clock = icon("Clock", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", "M12 6v6l4 2")
+    val ClockFilled = icon("ClockFilled", "M22 12a10 10 0 1 1-20 0a10 10 0 1 1 20 0z", filled = true)
+    val Settings = icon(
+        "Settings",
+        "M12.22 2h-0.44a2 2 0 0 0-2 2v0.18a2 2 0 0 1-1 1.73l-0.43 0.25a2 2 0 0 1-2 0l-0.15-0.08a2 2 0 0 0-2.73 0.73l-0.22 0.38a2 2 0 0 0 0.73 2.73l0.15 0.1a2 2 0 0 1 1 1.72v0.51a2 2 0 0 1-1 1.74l-0.15 0.09a2 2 0 0 0-0.73 2.73l0.22 0.38a2 2 0 0 0 2.73 0.73l0.15-0.08a2 2 0 0 1 2 0l0.43 0.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h0.44a2 2 0 0 0 2-2v-0.18a2 2 0 0 1 1-1.73l0.43-0.25a2 2 0 0 1 2 0l0.15 0.08a2 2 0 0 0 2.73-0.73l0.22-0.39a2 2 0 0 0-0.73-2.73l-0.15-0.08a2 2 0 0 1-1-1.74v-0.5a2 2 0 0 1 1-1.74l0.15-0.09a2 2 0 0 0 0.73-2.73l-0.22-0.38a2 2 0 0 0-2.73-0.73l-0.15 0.08a2 2 0 0 1-2 0l-0.43-0.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+        "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z",
+    )
+    val Book = icon(
+        "Book",
+        "M12 7v14",
+        "M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z",
+    )
+    val Chart = icon("Chart", "M3 3v16a2 2 0 0 0 2 2h16", "M18 17V9", "M13 17V5", "M8 17v-3")
+    val Layout = icon(
+        "Layout",
+        "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+        "M3 9h18",
+        "M9 21V9",
+    )
+    val Rows = icon("Rows", "M5 3h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M5 13h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z")
+    val Compact = icon("Compact", "M3 5h18", "M3 10h18", "M3 15h18", "M3 20h18")
+    val Photo = icon(
+        "Photo",
+        "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+        "M11 9a2 2 0 1 1-4 0a2 2 0 1 1 4 0z",
+        "M21 15l-3.09-3.09a2 2 0 0 0-2.82 0L6 21",
+    )
+    val Grid = icon(
+        "Grid",
+        "M4 3h5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+        "M15 3h5a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+        "M15 12h5a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z",
+        "M4 16h5a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z",
+    )
+    /** Two branches joining: merged communities. */
+    val Merge = icon("Merge", "M8 6L12 2L16 6", "M12 2v10.3a4 4 0 0 1-1.17 2.87L4 22", "M20 22l-5-5")
+    /** A heartbeat: community health. */
+    val Pulse = icon("Pulse", "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a0.25 0.25 0 0 1-0.48 0L9.24 2.18a0.25 0.25 0 0 0-0.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2")
+    /** A speech bubble struck through: muted words. */
+    val MuteWords = icon(
+        "MuteWords",
+        "M20.5 14.9A9 9 0 0 0 9.1 3.5",
+        "M2 2l20 20",
+        "M5.6 5.6C3 8.3 2.3 12.5 4 16l-2 6 6-2c3.4 1.7 7.6 1.1 10.4-1.6",
+    )
+    /** An hourglass: the feed budget. */
+    val Hourglass = icon(
+        "Hourglass",
+        "M5 22h14", "M5 2h14",
+        "M17 22v-4.17a2 2 0 0 0-0.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22",
+        "M7 2v4.17a2 2 0 0 0 0.59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2",
+    )
+    /** Sparkles: tidied links. */
+    val Sparkle = icon(
+        "Sparkle",
+        "M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a0.5 0.5 0 0 1 0-0.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a0.5 0.5 0 0 1 0.96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.13 1.58a0.5 0.5 0 0 1 0 0.96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.13a0.5 0.5 0 0 1-0.96 0z",
+        "M20 3v4", "M22 5h-4",
+    )
+    val Trash = icon("Trash", "M3 6h18", "M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6", "M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2")
+    val Close = icon("Close", "M18 6L6 18", "M6 6l12 12")
+    val TextSize = icon("TextSize", "M4 7V4h16v3", "M9 20h6", "M12 4v16")
+    val Users = icon(
+        "Users",
+        "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
+        "M13 7a4 4 0 1 1-8 0a4 4 0 1 1 8 0z",
+        "M22 21v-2a4 4 0 0 0-3-3.87",
+        "M16 3.13a4 4 0 0 1 0 7.75",
+    )
+    val Moon = icon("Moon", "M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z")
+
     /** The icon for a fixed feed (Popular, All, Local), or null to use its letter avatar. */
     fun feed(community: String): ImageVector? = when (community.lowercase().removePrefix(":")) {
         "popular" -> Trending

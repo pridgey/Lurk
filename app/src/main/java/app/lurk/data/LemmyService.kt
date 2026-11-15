@@ -352,7 +352,7 @@ class LemmyService(
                         else -> picked.sortedByDescending { it.activeMonth }
                     }
                 }
-                return indexPage(ordered, cursor, DISCOVER_PAGE)
+                return indexPage(foldCopies(ordered), cursor, DISCOVER_PAGE)
             }
             if (cursor != null) return CommunityPage(emptyList(), null)
             if (topic != null) {
@@ -364,11 +364,44 @@ class LemmyService(
     }
 
     /** One page of [list], from the offset in [cursor]. */
-    private fun indexPage(list: List<IndexedCommunity>, cursor: String?, size: Int): CommunityPage {
+    private fun indexPage(list: List<Folded>, cursor: String?, size: Int): CommunityPage {
         val from = cursor?.removePrefix(INDEX)?.toIntOrNull() ?: 0
-        val page = list.drop(from).take(size).map(::fromIndex)
+        val page = list.drop(from).take(size).map { (c, copies) -> fromIndex(c).copy(copies = copies.map(::fromIndex)) }
         val next = (from + size).takeIf { it < list.size }?.let { INDEX + it }
         return CommunityPage(page, next)
+    }
+
+    /**
+     * [list] with copies of one community (the same name on other instances) folded into
+     * the busiest of them, where the first of them stood in [list]. Copies that have never
+     * had a post are left out.
+     */
+    private fun foldCopies(list: List<IndexedCommunity>): List<Folded> {
+        val groups = LinkedHashMap<String, MutableList<IndexedCommunity>>()
+        list.forEach { groups.getOrPut(it.name.lowercase()) { ArrayList() }.add(it) }
+        return groups.values.map { group ->
+            val busiest = group.sortedByDescending { it.activeMonth }
+            busiest.first() to busiest.drop(1).filter { it.posts > 0 }
+        }
+    }
+
+    /** What the community index knows about each of [names] (as feeds name them), and its busier copies. */
+    suspend fun indexHealth(names: List<String>): Map<String, IndexHealth> {
+        val all = index?.cached() ?: return emptyMap()
+        val reachable = reachable()
+        return withContext(Dispatchers.Default) {
+            val byName = all.filter { reachable(it.host) }.groupBy { it.name.lowercase() }
+            names.associateWith { name ->
+                val short = name.substringBefore('@').lowercase()
+                val host = name.substringAfter('@', instance).lowercase()
+                val same = byName[short].orEmpty()
+                val self = same.firstOrNull { it.host == host }
+                val floor = maxOf(3, (self?.activeMonth ?: 0) * 2)
+                val busier = same.filter { it.host != host && it.activeMonth >= floor }
+                    .sortedByDescending { it.activeMonth }.take(3).map(::fromIndex)
+                IndexHealth(self, busier)
+            }
+        }
     }
 
     private fun fromIndex(c: IndexedCommunity) = CommunityInfo(
@@ -441,7 +474,8 @@ class LemmyService(
                         named.sortedByDescending { it.subscribers } +
                         described.sortedByDescending { it.subscribers }
                 }
-                if (cursor != null) return indexPage(found, cursor, SEARCH_PAGE)
+                val folded = foldCopies(found)
+                if (cursor != null) return indexPage(folded, cursor, SEARCH_PAGE)
                 val local = try {
                     searchInstance(q, null).communities
                 } catch (e: CancellationException) {
@@ -453,7 +487,7 @@ class LemmyService(
                 val known = found.mapTo(HashSet()) { fromIndex(it).name.lowercase() }
                 val extra = local.filter { it.name.lowercase() !in known }
                 if (found.isEmpty()) return CommunityPage(extra, null)
-                val first = indexPage(found, null, SEARCH_PAGE)
+                val first = indexPage(folded, null, SEARCH_PAGE)
                 val (extraExact, extraRest) = extra.partition { it.name.substringBefore('@').equals(lower, ignoreCase = true) }
                 val (pageExact, pageRest) = first.communities.partition { it.name.substringBefore('@').equals(lower, ignoreCase = true) }
                 return CommunityPage(pageExact + extraExact + pageRest + extraRest, first.after)
@@ -724,3 +758,9 @@ class LemmyClient(
         val apis = ConcurrentHashMap<String, LemmyApi>()
     }
 }
+
+/** A community and its copies on other instances. */
+private typealias Folded = Pair<IndexedCommunity, List<IndexedCommunity>>
+
+/** What the community index says about a joined community: itself ([info], if listed) and busier copies of it. */
+class IndexHealth(val info: IndexedCommunity?, val busier: List<CommunityInfo>)

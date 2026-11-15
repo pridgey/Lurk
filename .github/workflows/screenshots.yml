@@ -17,7 +17,10 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --tests 'app.lurk.data.*' --tests 'app.lurk.web.*' --stacktrace
       - name: Render screenshots
+        if: always()
         run: ./gradlew testDebugUnitTest --tests 'app.lurk.ui.ScreenshotTest' --stacktrace
       - uses: actions/upload-artifact@v4
         if: always()

@@ -72,6 +72,7 @@ class AccountActions(
     val setStandardReddit: (Boolean) -> Unit = {},
     /** Leave posts already seen out of this account's feeds. */
     val setHideSeen: (Boolean) -> Unit = {},
+    val openSettings: () -> Unit = {},
 )
 
 /**
@@ -138,33 +139,15 @@ internal fun AccountSheetContent(
             onRetry = actions.retrySync,
         )
 
-        SectionLabel("This account")
+        Spacer(Modifier.height(12.dp))
         RowGroup {
-            SwitchRow(
-                icon = LurkIcons.Eye,
-                title = "Show NSFW without tapping",
-                subtitle = "Also deals NSFW communities in Discover. Spoilers stay hidden",
-                checked = current.showNsfw,
-                onChange = actions.setNsfw,
+            GroupRow(
+                title = "Settings",
+                subtitle = "Layout, muted words, reader view, feed budget and more",
+                leading = { IconTile(LurkIcons.Settings) },
+                trailing = { Icon(LurkIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
+                onClick = { pick(actions.openSettings) },
             )
-            GroupDivider()
-            SwitchRow(
-                icon = LurkIcons.EyeOff,
-                title = "Hide posts I've seen",
-                subtitle = "Feeds show only posts you haven't scrolled past",
-                checked = current.hideSeen,
-                onChange = actions.setHideSeen,
-            )
-            if (current.label != null) {
-                GroupDivider()
-                SwitchRow(
-                    icon = LurkIcons.Lock,
-                    title = "Require PIN",
-                    subtitle = "Ask for it when switching to this account",
-                    checked = current.locked,
-                    onChange = { on -> pick(if (on) actions.setPin else actions.removePin) },
-                )
-            }
         }
 
         if (others.isNotEmpty()) {
@@ -195,17 +178,6 @@ internal fun AccountSheetContent(
                 AddRow("Bluesky", "Your handle and an app password", LurkIcons.Plus) { pick(actions.addBluesky) }
             }
 
-            SectionLabel("Lurk")
-            RowGroup {
-                SwitchRow(
-                    icon = LurkIcons.Globe,
-                    title = "Standard Reddit accounts",
-                    subtitle = if (standardReddit) "Signed in on Reddit's site. Reddit blocks Lurk's browser right now."
-                        else "Hidden while off. Reddit blocks Lurk's browser right now.",
-                    checked = standardReddit,
-                    onChange = { on -> pick { actions.setStandardReddit(on) } },
-                )
-            }
         }
 
         val canRemove = current.signedIn || current.expired || (multiProfile && accounts.size > 1)
