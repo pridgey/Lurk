@@ -44,8 +44,18 @@ data class Account(
     val token: String? = null,
     /** Bluesky: the token that renews [token]. Each renewal replaces both. */
     val refreshToken: String? = null,
+    /** Muted words and /expressions/; matching posts stay out of feeds. See [MuteFilter]. */
+    val mutes: List<String> = emptyList(),
+    /** Layouts picked for particular feeds, by [layoutKey]. Others use the app's default. */
+    val layouts: Map<String, String> = emptyMap(),
+    /** Copies of a community on several instances, read as one feed. */
+    val merged: List<MergedCommunity> = emptyList(),
 ) {
     val locked: Boolean get() = pinHash != null
+
+    /** The merged community [key] names, if it's one. */
+    fun mergedFor(key: String?): MergedCommunity? =
+        key?.takeIf { it.startsWith(MergedCommunity.PREFIX) }?.let { k -> merged.firstOrNull { it.key.equals(k, ignoreCase = true) } }
 
     val signedIn: Boolean get() = username != null
 
@@ -218,7 +228,12 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
      */
     fun absorb(from: String, into: String) {
         val old = find(from) ?: return
-        update(into) { it.copy(pinHash = old.pinHash, pinSalt = old.pinSalt, showNsfw = old.showNsfw, hideSeen = old.hideSeen) }
+        update(into) {
+            it.copy(
+                pinHash = old.pinHash, pinSalt = old.pinSalt, showNsfw = old.showNsfw, hideSeen = old.hideSeen,
+                mutes = old.mutes, layouts = old.layouts, merged = old.merged,
+            )
+        }
         if (old.locked) unlockedId = into
         runCatching { WebProfiles.wipe(profileFor(from)) }
         remove(from)
@@ -277,6 +292,9 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     instance = o.optString("instance").ifBlank { null },
                     token = o.optString("token").ifBlank { null },
                     refreshToken = o.optString("refreshToken").ifBlank { null },
+                    mutes = o.optJSONArray("mutes")?.let { m -> (0 until m.length()).map { m.getString(it) } }.orEmpty(),
+                    layouts = o.optJSONObject("layouts")?.let { l -> l.keys().asSequence().associateWith { l.getString(it) } }.orEmpty(),
+                    merged = o.optJSONArray("merged")?.let { m -> (0 until m.length()).mapNotNull { MergedCommunity.decode(m.optJSONObject(it)) } }.orEmpty(),
                 )
             }
         }.getOrDefault(emptyList())
@@ -299,7 +317,10 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
                     .put("kind", a.kind.name)
                     .put("instance", a.instance ?: "")
                     .put("token", a.token ?: "")
-                    .put("refreshToken", a.refreshToken ?: ""),
+                    .put("refreshToken", a.refreshToken ?: "")
+                    .put("mutes", JSONArray(a.mutes))
+                    .put("layouts", JSONObject(a.layouts as Map<*, *>))
+                    .put("merged", JSONArray(a.merged.map { it.encode() })),
             )
         }
         prefs.edit().putString(KEY_ACCOUNTS, arr.toString()).putString(KEY_ACTIVE, activeId).apply()
@@ -311,3 +332,30 @@ class AccountStore(context: Context, val multiProfile: Boolean) {
         const val KEY_STANDARD_REDDIT = "standardReddit"
     }
 }
+
+/**
+ * One community kept on several instances (c/linux on lemmy.ml, lemmy.world, ...) read as
+ * a single feed. [key] stands in for a community name wherever feeds take one: it starts
+ * with [PREFIX], which no site's community names do.
+ */
+data class MergedCommunity(val key: String, val label: String, val members: List<String>) {
+    fun encode(): JSONObject = JSONObject().put("key", key).put("label", label).put("members", JSONArray(members))
+
+    companion object {
+        const val PREFIX = "+"
+
+        fun keyFor(label: String) = PREFIX + label.lowercase()
+
+        fun isKey(name: String?) = name?.startsWith(PREFIX) == true
+
+        fun decode(o: JSONObject?): MergedCommunity? {
+            o ?: return null
+            val members = o.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.getString(it) } }.orEmpty()
+            if (members.isEmpty()) return null
+            return MergedCommunity(o.optString("key").ifBlank { return null }, o.optString("label"), members)
+        }
+    }
+}
+
+/** Where a feed's layout choice is kept: its community, lowercase, or Home. */
+fun layoutKey(community: String?): String = community?.lowercase() ?: ":home"

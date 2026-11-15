@@ -128,6 +128,7 @@ class DiscoverScreen(
         val top = deck.firstOrNull() ?: return
         deck.removeAt(0)
         seen.add(top.name)
+        top.copies.forEach { seen.add(it.name) }
         if (join) {
             joined++
             subscribe(top.name, true)
@@ -135,6 +136,18 @@ class DiscoverScreen(
             skipped++
         }
         last = Swipe(top, join)
+        topUp()
+        peekAhead()
+    }
+
+    /** The top card's community and its copies were merged and joined: it's done with, without an Undo. */
+    fun mergedTop() {
+        val top = deck.firstOrNull() ?: return
+        deck.removeAt(0)
+        seen.add(top.name)
+        top.copies.forEach { seen.add(it.name) }
+        joined++
+        last = null
         topUp()
         peekAhead()
     }

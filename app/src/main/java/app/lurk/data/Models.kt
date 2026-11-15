@@ -159,6 +159,8 @@ data class CommunityInfo(
     val subscribed: Boolean,
     /** Posts the site has (Lemmy: the ones that reached this instance), when it says. */
     val posts: Int? = null,
+    /** The same community on other instances (Lemmy), busiest first. This one is the busiest. */
+    val copies: List<CommunityInfo> = emptyList(),
 )
 
 /** [after]: the cursor for the next page, or null at the end. */

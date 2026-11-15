@@ -1,6 +1,7 @@
 package app.lurk.data
 
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -14,19 +15,40 @@ import kotlinx.coroutines.launch
 /** One entry in the back stack. Each keeps its own loaded data and scroll position. */
 sealed interface Screen
 
-/** A list of posts: Home (community = null), a fixed feed like r/all, or a community. */
+/** What a feed needs from its account beyond the site: what's been seen, what's muted, and where to report. */
+class FeedHooks(
+    /** Posts the account has had on screen; null keeps no record (previews, tests). */
+    val seen: SeenPosts? = null,
+    /** Whether to leave out posts already seen, read at each load. */
+    val hideSeen: () -> Boolean = { false },
+    /** The account's muted words, read at each load. */
+    val mutes: () -> MuteFilter = { MuteFilter.None },
+    /** Posts to read before the feed pauses; 0 for no limit. */
+    val budget: () -> Int = { 0 },
+    /** Reads a merged community's copies; null reads the feed's community from the site. */
+    val merged: MergedFeed? = null,
+    /** The layout to start with, and where a change of it is kept. */
+    val layout: () -> PostLayout = { PostLayout.Comfortable },
+    val saveLayout: (PostLayout) -> Unit = {},
+    /** Each page as it arrives: [community] is the feed's, or null for mixed feeds. */
+    val onPage: (community: String?, posts: List<Post>) -> Unit = { _, _ -> },
+    /** Posts that stayed on screen a moment. */
+    val onRead: (List<Post>) -> Unit = {},
+    /** Posts left out of a page: seen before, or muted. */
+    val onHidden: (seen: Int, muted: Int) -> Unit = { _, _ -> },
+)
+
+/** A list of posts: Home (community = null), a fixed feed like r/all, a community, or a merged one. */
 class FeedScreen(
     val community: String?,
     sort: Sort?,
     private val service: Service,
     private val scope: CoroutineScope,
-    /** Posts the account has had on screen; null keeps no record (previews, tests). */
-    private val seen: SeenPosts? = null,
-    /** Whether to leave out posts already seen, read at each load. */
-    private val hideSeen: () -> Boolean = { false },
+    private val hooks: FeedHooks = FeedHooks(),
 ) : Screen {
     var sort by mutableStateOf(sort)
         private set
+    /** Everything loaded, muted posts included; [shown] is what's on screen. */
     val posts = mutableStateListOf<Post>()
     var loading by mutableStateOf(false)
         private set
@@ -40,11 +62,26 @@ class FeedScreen(
      */
     var listState by mutableStateOf(LazyListState())
         private set
+    /** The same, for the gallery's grid. */
+    var gridState by mutableStateOf(LazyStaggeredGridState())
+        private set
+
+    var layout by mutableStateOf(hooks.layout())
+        private set
 
     /** When the posts shown were fetched (ms), and anything about that to show over them, for services that say (RSS). */
     var fetchedAt by mutableStateOf<Long?>(null)
         private set
     var notice by mutableStateOf<String?>(null)
+        private set
+
+    /** Posts muted words caught, by name, with the rule each tripped. */
+    val muted = mutableStateMapOf<String, String>()
+    /** Shows the muted posts where they were, for a look. */
+    var showMuted by mutableStateOf(false)
+
+    /** Where the feed budget ran out: posts past this index wait for "Keep going". */
+    var budgetCap by mutableStateOf<Int?>(if (ReadingSession.spent(hooks.budget())) 0 else null)
         private set
 
     private var after: String? = null
@@ -56,41 +93,58 @@ class FeedScreen(
     var skippedSeen by mutableStateOf(false)
         private set
 
+    /** What's on screen: muted posts are left out unless asked for, and nothing past the budget. */
+    val shown: List<Post>
+        get() {
+            val visible = if (showMuted || muted.isEmpty()) posts.toList() else posts.filter { it.name !in muted }
+            return budgetCap?.let { visible.take(it) } ?: visible
+        }
+
+    val isMerged: Boolean get() = hooks.merged != null
+
     val label: String
         get() = community?.let { c ->
             service.fixedFeeds.firstOrNull { it.community.equals(c, ignoreCase = true) }?.label ?: service.naming.community(c)
         } ?: "Home"
-    val webUrl: String get() = service.links.feed(community, sort)
+    val webUrl: String get() = service.links.feed(community?.takeIf { !isMerged }, sort)
 
     /** Feeds that mix communities show each post's. */
-    val showsCommunity: Boolean get() = service.isMixed(community)
+    val showsCommunity: Boolean get() = isMerged || service.isMixed(community)
 
     /** What a slow first load is waiting on, e.g. Reddit's RSS rate limit. */
     val loadingNote: String? get() = service.loadingNote
 
+    /** The feed budget in posts; 0 for none. */
+    val budget: Int get() = hooks.budget()
+
+    /** Whether the feed budget has paused this feed. */
+    val paused: Boolean get() = budgetCap != null
+
     fun loadMore() {
-        if (loading || endReached) return
+        if (loading || endReached || paused) return
         val gen = generation
         loading = true
         error = null
         job = scope.launch {
             try {
                 var pages = 0
-                // A first page of only seen posts would look empty: keep going a little.
+                // A first page of only seen or muted posts would look empty: keep going a little.
                 do {
                     val first = after == null
-                    val page = service.feed(community, sort, after, refresh = force && first)
+                    val refresh = force && first
+                    val page = hooks.merged?.page(sort, after, refresh) ?: service.feed(community, sort, after, refresh)
                     if (gen != generation) return@launch
                     if (first) {
                         fetchedAt = page.fetchedAt
                         notice = page.notice
                     }
                     force = false
+                    hooks.onPage(community?.takeIf { !service.isMixed(it) && !isMerged }, page.posts)
                     posts.addAll(fresh(page.posts))
                     after = page.after
                     endReached = page.after == null
                     pages++
-                } while (posts.isEmpty() && !endReached && pages < 5)
+                } while (shown.isEmpty() && !endReached && pages < 5)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -106,7 +160,7 @@ class FeedScreen(
      * and nothing you're looking at moves. Skips any already here.
      */
     fun mixIn(extra: List<Post>, spacing: Int) {
-        if (loading) return
+        if (loading || paused) return
         val add = fresh(extra)
         if (add.isEmpty()) return
         val index = posts.withIndex().associate { (i, p) -> p.name to i }
@@ -117,25 +171,69 @@ class FeedScreen(
         merged.forEachIndexed { i, p -> if (p.name !in index) posts.add(i, p) }
     }
 
-    /** Of [incoming], the posts not already here, less any already seen if the account hides those. */
+    /**
+     * Of [incoming], the posts not already here, less any already seen if the account hides
+     * those. Muted ones are kept, marked in [muted], so they can be shown on request.
+     */
     private fun fresh(incoming: List<Post>): List<Post> {
         val have = posts.mapTo(HashSet()) { it.name }
-        val skip = seen?.takeIf { hideSeen() }
-        return incoming.filter { post ->
+        val skip = hooks.seen?.takeIf { hooks.hideSeen() }
+        val mutes = hooks.mutes()
+        var seenCount = 0
+        var mutedCount = 0
+        val out = incoming.filter { post ->
             if (!have.add(post.name)) return@filter false
-            val wasSeen = skip?.wasSeen(post.name) == true
-            if (wasSeen) skippedSeen = true
-            !wasSeen
+            if (skip?.wasSeen(post.name) == true) {
+                skippedSeen = true
+                seenCount++
+                return@filter false
+            }
+            mutes.match(post)?.let { rule ->
+                muted[post.name] = rule
+                mutedCount++
+            }
+            true
         }
+        hooks.onHidden(seenCount, mutedCount)
+        return out
     }
 
     /** Notes posts that have been on screen a moment. */
     fun markSeen(names: Collection<String>) {
-        seen?.mark(names)
+        hooks.seen?.mark(names)
+        val newly = names.filter { counted.add(it) }
+        if (newly.isEmpty()) return
+        val byName = posts.associateBy { it.name }
+        hooks.onRead(newly.mapNotNull { byName[it] })
+        ReadingSession.note(newly.size)
+        checkBudget()
+    }
+
+    /** Posts counted toward stats and the budget on this screen, so scrolling back doesn't count twice. */
+    private val counted = HashSet<String>()
+
+    /** Once the budget's spent, the feed stops a little below what's on screen. */
+    private fun checkBudget() {
+        if (budgetCap != null || !ReadingSession.spent(hooks.budget())) return
+        val list = shown
+        val index = list.withIndex().associate { (i, p) -> p.name to i }
+        val lastOnScreen = if (layout == PostLayout.Gallery) {
+            gridState.layoutInfo.visibleItemsInfo.mapNotNull { index[it.key as? String] }.maxOrNull()
+        } else {
+            listState.layoutInfo.visibleItemsInfo.mapNotNull { index[it.key as? String] }.maxOrNull()
+        } ?: (list.size - 1)
+        budgetCap = (lastOnScreen + 1).coerceAtMost(list.size)
+    }
+
+    /** Another helping of the feed budget. */
+    fun keepGoing() {
+        ReadingSession.keepGoing()
+        budgetCap = null
+        if (shown.size >= posts.size - 2) loadMore()
     }
 
     fun saveSeen() {
-        seen?.flush()
+        hooks.seen?.flush()
     }
 
     /** Stops a load in progress, once the screen is gone. */
@@ -151,12 +249,17 @@ class FeedScreen(
         generation++
         job?.cancel()
         posts.clear()
+        muted.clear()
+        showMuted = false
         skippedSeen = false
         after = null
         endReached = false
         loading = false
         error = null
         listState = LazyListState()
+        gridState = LazyStaggeredGridState()
+        // A new budget only comes with a new sitting; until then a refreshed feed stays paused.
+        budgetCap = if (ReadingSession.spent(hooks.budget())) 0 else null
         loadMore()
     }
 
@@ -164,6 +267,17 @@ class FeedScreen(
         if (newSort == sort) return
         sort = newSort
         refresh()
+    }
+
+    /** Shows [newLayout] without keeping it for this feed: the default changed. */
+    fun useLayout(newLayout: PostLayout) {
+        layout = newLayout
+    }
+
+    fun changeLayout(newLayout: PostLayout) {
+        if (newLayout == layout) return
+        layout = newLayout
+        hooks.saveLayout(newLayout)
     }
 }
 

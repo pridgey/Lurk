@@ -41,6 +41,12 @@ class AccountSession(
     private val profile = store.profileFor(accountId)
     private val seenCommunities = SeenCommunities(context, accountId)
     private val seenPosts = SeenPosts(context, accountId)
+    /** Lurk's own settings, shared by every account. */
+    val prefs = LurkPrefs.get(context)
+    val stats = ReadingStats.get(context)
+    val readLater = ReadLater(context, accountId)
+    val activity = CommunityActivity(context, accountId)
+    private val reader = ArticleReader(context)
     private val build: Int = context.packageManager.getPackageInfo(context.packageName, 0).let {
         if (android.os.Build.VERSION.SDK_INT >= 28) it.longVersionCode.toInt() else @Suppress("DEPRECATION") it.versionCode
     }
@@ -168,8 +174,131 @@ class AccountSession(
 
     // --- Navigation ---
 
-    fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen =
-        FeedScreen(community, sort, service, scope, seenPosts, hideSeen = { account?.hideSeen == true }).also { it.loadMore() }
+    fun feed(community: String?, sort: Sort? = service.feedSorts.firstOrNull()): FeedScreen {
+        val merged = account?.mergedFor(community)
+        val hooks = FeedHooks(
+            seen = seenPosts,
+            hideSeen = { account?.hideSeen == true },
+            mutes = { muteFilter() },
+            budget = { prefs.feedBudget },
+            merged = merged?.let { m -> MergedFeed(m.members) { c, sorted, cursor, refresh -> service.feed(c, sorted, cursor, refresh) } },
+            layout = { layoutFor(community) },
+            saveLayout = { layout -> setLayout(community, layout) },
+            onPage = { c, posts -> activity.note(c, posts) },
+            onRead = { posts -> stats.recordRead(posts.map { p -> p.community?.let(service.naming::community) ?: service.naming.user(p.author) }) },
+            onHidden = { seen, muted -> stats.recordHidden(seen, muted) },
+        )
+        return FeedScreen(community, sort, service, scope, hooks).also { it.loadMore() }
+    }
+
+    /** The account's muted words, compiled once per change. */
+    private var mutes: Pair<List<String>, MuteFilter>? = null
+
+    private fun muteFilter(): MuteFilter {
+        val rules = account?.mutes.orEmpty()
+        mutes?.takeIf { it.first == rules }?.let { return it.second }
+        return MuteFilter(rules).also { mutes = rules to it }
+    }
+
+    fun setMutes(rules: List<String>) {
+        store.update(accountId) { it.copy(mutes = rules.map(String::trim).filter { r -> r.isNotEmpty() }.distinct()) }
+    }
+
+    /** The layout [community]'s feed uses: its own, else the app's default. */
+    fun layoutFor(community: String?): PostLayout =
+        PostLayout.of(account?.layouts?.get(layoutKey(community))) ?: prefs.defaultLayout
+
+    /** Keeps [layout] for [community]'s feed; the default layout needs no entry. */
+    private fun setLayout(community: String?, layout: PostLayout) {
+        store.update(accountId) {
+            val key = layoutKey(community)
+            it.copy(layouts = if (layout == prefs.defaultLayout) it.layouts - key else it.layouts + (key to layout.name))
+        }
+    }
+
+    /** Whether [community] is one of this account's merged communities. */
+    fun isMerged(community: String?): Boolean = account?.mergedFor(community) != null
+
+    /** The merged community that reads [community], if it's part of one. */
+    fun mergedHolding(community: String): MergedCommunity? =
+        account?.merged?.firstOrNull { m -> m.members.any { it.equals(community, ignoreCase = true) } }
+
+    /** Reads [members] as one feed, named [label]. Joins any not joined yet. Returns its key. */
+    fun merge(label: String, members: List<String>): String {
+        val key = MergedCommunity.keyFor(label)
+        val list = members.distinctBy { it.lowercase() }
+        store.update(accountId) { a ->
+            a.copy(merged = a.merged.filterNot { it.key.equals(key, ignoreCase = true) } + MergedCommunity(key, label, list))
+        }
+        if (account?.username != null && !isRss) list.filterNot(::isSubscribed).forEach { setSubscribed(it, true) }
+        return key
+    }
+
+    fun unmerge(key: String) {
+        store.update(accountId) { a -> a.copy(merged = a.merged.filterNot { it.key.equals(key, ignoreCase = true) }) }
+    }
+
+    /**
+     * Another of your accounts that follows [community] (as this account names it), for
+     * Discover's "Joined on" badge. Matched by site: Reddit with Reddit, Lemmy by
+     * community address, whichever instance the other account is on.
+     */
+    fun joinedElsewhere(community: String): Account? {
+        val me = account ?: return null
+        val target = canonical(me, community) ?: return null
+        return store.visibleAccounts.firstOrNull { other ->
+            other.id != me.id && !store.needsPin(other.id) &&
+                other.communities.any { canonical(other, it) == target }
+        }
+    }
+
+    /** A community as the same key whichever account names it: "reddit:pics", "lemmy:linux@lemmy.ml". */
+    private fun canonical(a: Account, name: String): String? = when (a.kind) {
+        ServiceKind.Reddit, ServiceKind.RedditRss -> "reddit:" + name.lowercase()
+        ServiceKind.Lemmy -> "lemmy:" + (if ('@' in name) name else "$name@${a.instance}").lowercase()
+        ServiceKind.Bluesky -> null
+    }
+
+    /** Opens [url] in reader view. */
+    fun openReader(url: String, postTitle: String? = null) {
+        push(ReaderScreen(prefs.tidy(url), postTitle, reader, scope).also { it.load() })
+    }
+
+    /**
+     * A post's link: in reader view when that's the default and it looks like an article,
+     * otherwise as any other link.
+     */
+    fun openArticle(url: String, postTitle: String?) {
+        if (prefs.readerByDefault && ReaderScreen.looksLikeArticle(url) && links.route(links.resolve(url)) == null) {
+            openReader(url, postTitle)
+        } else {
+            openLink(url)
+        }
+    }
+
+    /** Reader view's "Open the original": the page itself, wherever links like it open. */
+    fun openReaderOriginal(screen: ReaderScreen) = openLink(screen.article?.url ?: screen.url)
+
+    fun settings(page: SettingsPage = SettingsPage.Main): SettingsScreen = SettingsScreen(page)
+
+    /** Community health's state, kept while the session lasts so a check carries on. */
+    val health: HealthCheck by lazy { HealthCheck(service, activity, scope) }
+
+    /** Back in the app: a long break starts a new sitting for the feed budget. */
+    private var resumedAt = 0L
+
+    private fun noteBack() {
+        ReadingSession.onBack()
+        resumedAt = System.currentTimeMillis()
+    }
+
+    private fun noteAway() {
+        if (resumedAt != 0L) stats.recordTime(System.currentTimeMillis() - resumedAt)
+        resumedAt = 0L
+        ReadingSession.onAway()
+        stats.flush()
+        activity.flush()
+    }
 
     /** An RSS account: posts only, with comments, users and other pages on Reddit in Chrome. */
     val isRss: Boolean get() = service.kind == ServiceKind.RedditRss
@@ -182,6 +311,7 @@ class AccountSession(
      * from the top of the list, so it never yanks you from where you were reading.
      */
     fun onResume() {
+        noteBack()
         val rss = service as? RedditRssService ?: return
         startMixing(rss)
         val feed = current as? FeedScreen ?: return
@@ -192,6 +322,7 @@ class AccountSession(
 
     /** Out of the app: Home stops taking posts from subreddits, so it doesn't spend requests unseen. */
     fun onPause() {
+        noteAway()
         mixing?.cancel()
         mixing = null
     }
@@ -244,7 +375,7 @@ class AccountSession(
 
     /** Whether [community] can have a scoreboard: a single community, on a site with post titles. */
     fun canShowGames(community: String?): Boolean =
-        community != null && service.findsGames && !service.isMixed(community)
+        community != null && service.findsGames && !service.isMixed(community) && !isMerged(community)
 
     private var discoverScreen: DiscoverScreen? = null
 
@@ -258,7 +389,7 @@ class AccountSession(
 
     /** Whether the signed-in account can subscribe to [community]'s feed (not Home, All, ...). */
     fun canSubscribe(community: String?): Boolean =
-        community != null && account?.username != null && !service.isMixed(community) && !isRss
+        community != null && account?.username != null && !service.isMixed(community) && !isRss && !isMerged(community)
 
     fun isSubscribed(community: String): Boolean =
         account?.communities?.any { it.equals(community, ignoreCase = true) } == true
@@ -308,6 +439,7 @@ class AccountSession(
     private fun close(screen: Screen) {
         (screen as? FeedScreen)?.cancel()
         (screen as? GamesScreen)?.cancel()
+        (screen as? ReaderScreen)?.cancel()
     }
 
     fun openWeb(url: String) {
@@ -326,7 +458,7 @@ class AccountSession(
 
     /** Opens a link from a native screen: natively if possible, else images, web or outside. */
     fun openLink(raw: String) {
-        val uri = links.resolve(raw)
+        val uri = links.resolve(prefs.tidy(raw))
         links.route(uri)?.let {
             // RSS accounts open subreddits here, from their feeds; everything else is Chrome's.
             if (isRss && it is Route.Feed && it.community != null) return push(feed(it.community))
@@ -351,7 +483,7 @@ class AccountSession(
         when (val decision = links.decide(uri)) {
             Decision.Stay -> openWeb(uri.toString())
             is Decision.Rewrite -> openWeb(decision.uri.toString())
-            Decision.External -> onExternal(uri)
+            Decision.External -> onExternal(Uri.parse(prefs.tidy(uri.toString())))
             Decision.Block -> Unit
         }
     }
@@ -592,6 +724,8 @@ class AccountSession(
     }
 
     fun destroy() {
+        stats.flush()
+        activity.flush()
         scope.cancel()
         browser.destroy()
         service.destroy()

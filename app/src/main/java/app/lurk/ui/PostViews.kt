@@ -78,6 +78,14 @@ class PostHandlers(
     val share: (Post) -> Unit,
     /** The video playing in place in the list, if any. */
     val inlineVideo: InlineVideo = InlineVideo(),
+    /** A link post's link: reader view or the browser, as settings say. */
+    val openArticle: (Post) -> Unit = { openLink(it.url) },
+    /** A link post's link in reader view, whatever the setting. */
+    val openReader: ((Post) -> Unit)? = null,
+    /** Puts a post on the Read later shelf, or takes it off. */
+    val toggleLater: ((Post) -> Unit)? = null,
+    /** Whether a post is on the Read later shelf. */
+    val isLater: (String) -> Boolean = { false },
 )
 
 /** Whether the active account shows NSFW media without a tap. */
@@ -86,27 +94,34 @@ val LocalShowNsfw = compositionLocalOf { false }
 /** How the active account's site names communities and people. */
 val LocalNaming = compositionLocalOf<Naming> { RedditNaming }
 
-private val CardShape = RoundedCornerShape(24.dp)
-private val MediaShape = RoundedCornerShape(16.dp)
+internal val PostCardShape = RoundedCornerShape(24.dp)
+internal val MediaShape = RoundedCornerShape(16.dp)
 
-/** A post in a feed: a card; tapping it opens the thread. */
+/**
+ * A post in a feed: a card; tapping it opens the thread. [large] gives the media the card's
+ * full width and its own shape, uncropped up to portrait.
+ */
 @Composable
-fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers) {
+fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers, large: Boolean = false) {
     Surface(
-        shape = CardShape,
+        shape = PostCardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 5.dp)
-            .clip(CardShape)
+            .padding(horizontal = if (large) 8.dp else 12.dp, vertical = if (large) 6.dp else 5.dp)
+            .clip(PostCardShape)
             .clickable { on.openThread(post) },
     ) {
+        if (large && post.media != null) {
+            LargeCardBody(post, showCommunity, actions, on)
+            return@Surface
+        }
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 6.dp)) {
             PostHeader(post, showCommunity, on)
             if (post.title.isNotBlank()) {
                 Text(
                     post.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = if (large) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(top = 10.dp),
                 )
             }
@@ -126,6 +141,26 @@ fun PostCard(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandl
             }
             if (!post.isSelf && post.media == null) LinkPreview(post, on)
             post.media?.let { PostMediaView(post, it, compact = true, on = on) }
+            PostActions(post, actions, on, onComments = { on.openThread(post) })
+        }
+    }
+}
+
+/** A large card: header and title over media that runs to the card's edges, then the actions. */
+@Composable
+private fun LargeCardBody(post: Post, showCommunity: Boolean, actions: Actions, on: PostHandlers) {
+    Column {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp)) {
+            PostHeader(post, showCommunity, on)
+            if (post.title.isNotBlank()) {
+                Text(post.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 10.dp))
+            }
+            PostTags(post)
+        }
+        post.media?.let { media ->
+            Box(Modifier.padding(horizontal = 6.dp)) { PostMediaView(post, media, compact = true, on = on, tall = true) }
+        }
+        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 6.dp)) {
             PostActions(post, actions, on, onComments = { on.openThread(post) })
         }
     }
@@ -180,7 +215,7 @@ fun Avatar(name: String, size: Dp, modifier: Modifier = Modifier, tint: Color? =
 }
 
 @Composable
-private fun PostHeader(post: Post, showCommunity: Boolean, on: PostHandlers) {
+internal fun PostHeader(post: Post, showCommunity: Boolean, on: PostHandlers) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val naming = LocalNaming.current
     // Sites without communities always lead with the author.
@@ -209,7 +244,7 @@ private fun PostHeader(post: Post, showCommunity: Boolean, on: PostHandlers) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PostTags(post: Post) {
+internal fun PostTags(post: Post) {
     val tags = buildList {
         if (post.stickied) add("Pinned" to MaterialTheme.colorScheme.tertiary)
         if (post.over18) add("NSFW" to Color(0xFFE5484D))
@@ -251,7 +286,7 @@ private fun LinkPreview(post: Post, on: PostHandlers) {
             .padding(top = 10.dp)
             .fillMaxWidth()
             .clip(MediaShape)
-            .clickable { on.openLink(post.url) },
+            .clickable { on.openArticle(post) },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
             val thumb = post.thumbnail?.takeIf { (!post.over18 || LocalShowNsfw.current) && !post.spoiler }
@@ -286,17 +321,32 @@ private fun LinkPreview(post: Post, on: PostHandlers) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Icon(
-                LurkIcons.External, "Open link",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(end = 6.dp).size(18.dp),
-            )
+            val openReader = on.openReader?.takeIf { app.lurk.data.ReaderScreen.looksLikeArticle(post.url) }
+            if (openReader != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(end = 2.dp).height(32.dp).clip(CircleShape).clickable(onClickLabel = "Open in reader view") { openReader(post) },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp)) {
+                        Icon(LurkIcons.Book, null, Modifier.size(15.dp))
+                        Text("Reader", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 5.dp))
+                    }
+                }
+            } else {
+                Icon(
+                    LurkIcons.External, "Open link",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 6.dp).size(18.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: PostHandlers) {
+private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: PostHandlers, tall: Boolean = false) {
     val showNsfw = LocalShowNsfw.current
     var revealed by remember(post.name, showNsfw) { mutableStateOf(!((post.over18 && !showNsfw) || post.spoiler)) }
     val modifier = Modifier.padding(top = 10.dp)
@@ -323,7 +373,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
         return
     }
     when (media) {
-        is PostMedia.Image -> PictureView(media.picture, modifier) { on.openImage(media.picture.fullUrl, media.picture.url) }
+        is PostMedia.Image -> PictureView(media.picture, modifier, tall) { on.openImage(media.picture.fullUrl, media.picture.url) }
         is PostMedia.Video -> Box(modifier, contentAlignment = Alignment.Center) {
             val preview = media.preview
             val stream = media.stream
@@ -347,7 +397,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
                 return@Box
             }
             if (preview != null) {
-                PictureView(preview, Modifier, onClick = playHere)
+                PictureView(preview, Modifier, tall, onClick = playHere)
             } else {
                 Box(
                     Modifier
@@ -386,7 +436,7 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
         }
         is PostMedia.Gallery -> if (compact) {
             Box(modifier) {
-                PictureView(media.pictures.first(), Modifier) { on.openThread(post) }
+                PictureView(media.pictures.first(), Modifier, tall) { on.openThread(post) }
                 Surface(
                     shape = CircleShape,
                     color = Color.Black.copy(alpha = 0.55f),
@@ -417,15 +467,15 @@ private fun PostMediaView(post: Post, media: PostMedia, compact: Boolean, on: Po
 }
 
 @Composable
-private fun PictureView(picture: Picture, modifier: Modifier, onClick: () -> Unit) {
+private fun PictureView(picture: Picture, modifier: Modifier, tall: Boolean = false, onClick: () -> Unit) {
     AsyncImage(
         model = picture.url,
         contentDescription = null,
         contentScale = ContentScale.Crop,
         modifier = modifier
             .fillMaxWidth()
-            // Very tall images are cropped in lists; the viewer shows them whole.
-            .aspectRatio(picture.aspect.coerceIn(0.8f, 2.4f))
+            // Very tall images are cropped in lists (less so in large cards); the viewer shows them whole.
+            .aspectRatio(picture.aspect.coerceIn(if (tall) 0.62f else 0.8f, 2.4f))
             .clip(MediaShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onClick),
@@ -447,6 +497,7 @@ private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onCommen
                 Icon(LurkIcons.External, null, Modifier.padding(start = 6.dp).size(14.dp))
             }
             Spacer(Modifier.weight(1f))
+            LaterButton(post, on)
             RoundIcon(LurkIcons.Share, "Share", MaterialTheme.colorScheme.onSurfaceVariant) { on.share(post) }
             return@Row
         }
@@ -460,6 +511,7 @@ private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onCommen
             )
         }
         Spacer(Modifier.weight(1f))
+        LaterButton(post, on)
         val saved = actions.saved(post.name, post.saved)
         RoundIcon(
             if (saved) LurkIcons.BookmarkFilled else LurkIcons.Bookmark,
@@ -468,6 +520,18 @@ private fun PostActions(post: Post, actions: Actions, on: PostHandlers, onCommen
         ) { actions.toggleSave(post.name, post.saved) }
         RoundIcon(LurkIcons.Share, "Share", MaterialTheme.colorScheme.onSurfaceVariant) { on.share(post) }
     }
+}
+
+/** Puts the post on the Read later shelf, or takes it off. */
+@Composable
+internal fun LaterButton(post: Post, on: PostHandlers) {
+    val toggle = on.toggleLater ?: return
+    val later = on.isLater(post.name)
+    RoundIcon(
+        LurkIcons.Clock,
+        if (later) "Remove from Read later" else "Read later",
+        tint = if (later) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+    ) { toggle(post) }
 }
 
 /** A rounded, tinted container for actions. */
@@ -493,7 +557,7 @@ private fun Pill(
 }
 
 @Composable
-private fun RoundIcon(icon: ImageVector, description: String, tint: Color, onClick: () -> Unit) {
+internal fun RoundIcon(icon: ImageVector, description: String, tint: Color, onClick: () -> Unit) {
     Box(
         Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -593,7 +657,7 @@ fun SkeletonCard() {
     )
     val block = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = pulse)
     Surface(
-        shape = CardShape,
+        shape = PostCardShape,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
     ) {

@@ -1,5 +1,8 @@
 package app.lurk.ui
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -111,6 +114,10 @@ fun DiscoverView(
     activeLabel: String,
     onOpen: (String) -> Unit,
     onMessage: (String) -> Unit,
+    /** Another account of yours that follows a community, as a label ("u/name"), if one does. */
+    joinedElsewhere: (String) -> String? = { null },
+    /** Joins a community and its copies, read as one merged feed. Null where there are no copies. */
+    onMergeAll: ((CommunityInfo) -> Unit)? = null,
 ) {
     LaunchedEffect(screen) { screen.start() }
     // Back leaves the search before it leaves Discover.
@@ -163,7 +170,7 @@ fun DiscoverView(
         Column(Modifier.fillMaxSize()) {
             SearchField(screen.query, "Search ${noun.plural()} by topic", screen::type, screen::submitSearch, screen::clearSearch)
             if (screen.isSearching) {
-                SearchResults(screen, signedIn, activeLabel, onOpen, onMessage, Modifier.weight(1f))
+                SearchResults(screen, signedIn, activeLabel, onOpen, onMessage, Modifier.weight(1f), joinedElsewhere, onMergeAll)
             } else {
                 if (screen.topics.isNotEmpty()) TopicChips(screen.topics, screen.topic, screen::changeTopic)
                 Text(
@@ -232,6 +239,13 @@ fun DiscoverView(
                                         joinStamp = if (i == 0) (state.x.value / threshold).coerceIn(0f, 1f) else 0f,
                                         skipStamp = if (i == 0) (-state.x.value / threshold).coerceIn(0f, 1f) else 0f,
                                         onClick = { onOpen(community.name) },
+                                        elsewhere = joinedElsewhere(community.name),
+                                        onMergeAll = onMergeAll?.takeIf { signedIn && i == 0 && community.copies.isNotEmpty() }?.let { merge ->
+                                            {
+                                                merge(community)
+                                                screen.mergedTop()
+                                            }
+                                        },
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .padding(bottom = 20.dp)
@@ -348,6 +362,8 @@ private fun SearchResults(
     onOpen: (String) -> Unit,
     onMessage: (String) -> Unit,
     modifier: Modifier,
+    joinedElsewhere: (String) -> String?,
+    onMergeAll: ((CommunityInfo) -> Unit)?,
 ) {
     val noun = LocalNaming.current.communityNoun
     val list = rememberLazyListState()
@@ -373,6 +389,8 @@ private fun SearchResults(
                         activeLabel = activeLabel,
                         joined = info.subscribed || screen.isSubscribed(info.name),
                         signedIn = signedIn,
+                        elsewhere = joinedElsewhere(info.name),
+                        onMergeAll = onMergeAll?.takeIf { signedIn && info.copies.isNotEmpty() }?.let { merge -> { merge(info) } },
                         onOpen = { onOpen(info.name) },
                         onJoin = {
                             if (signedIn) screen.toggleJoin(info) else onMessage("Sign in to join ${noun.plural()}")
@@ -407,9 +425,12 @@ private fun ResultRow(
     signedIn: Boolean,
     onOpen: () -> Unit,
     onJoin: () -> Unit,
+    elsewhere: String? = null,
+    onMergeAll: (() -> Unit)? = null,
 ) {
     val naming = LocalNaming.current
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Column {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -445,12 +466,125 @@ private fun ResultRow(
             if (blurb.isNotBlank()) {
                 Text(blurb, style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+            elsewhere?.let { JoinedElsewhere(it, Modifier.padding(top = 6.dp)) }
         }
         if (signedIn) {
             if (joined) {
                 OutlinedButton(onClick = onJoin, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Joined") }
             } else {
                 FilledTonalButton(onClick = onJoin, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Join") }
+            }
+        }
+    }
+    if (info.copies.isNotEmpty()) {
+        var open by remember(info.name) { mutableStateOf(false) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .padding(start = 74.dp, end = 16.dp, bottom = 6.dp)
+                .clip(CircleShape)
+                .clickable(onClickLabel = if (open) "Hide copies" else "Show copies") { open = !open }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Icon(LurkIcons.Merge, null, tint = muted, modifier = Modifier.size(14.dp))
+            Text(
+                if (info.copies.size == 1) "1 copy on another instance" else "${info.copies.size} copies on other instances",
+                style = MaterialTheme.typography.labelMedium,
+                color = muted,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+            Icon(if (open) LurkIcons.ChevronDown else LurkIcons.Chevron, null, tint = muted, modifier = Modifier.padding(start = 2.dp).size(14.dp))
+        }
+        if (open) Copies(info, activeLabel, onMergeAll, Modifier.padding(start = 74.dp, end = 16.dp, bottom = 10.dp))
+    }
+    }
+}
+
+/** "Joined on u/name": another of your accounts already follows this community. */
+@Composable
+private fun JoinedElsewhere(label: String, modifier: Modifier = Modifier) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)) {
+            Icon(LurkIcons.Users, null, Modifier.size(13.dp))
+            Text(
+                "Joined on $label",
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 5.dp),
+            )
+        }
+    }
+}
+
+/**
+ * A community's copies on other instances, each with how busy it is next to this one,
+ * and a way to join them all as one merged feed.
+ */
+@Composable
+private fun Copies(info: CommunityInfo, activeLabel: String, onMergeAll: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val all = listOf(info) + info.copies
+    val busiest = all.maxOf { it.activeUsers ?: 0 }.coerceAtLeast(1)
+    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                "On ${all.size} instances · people $activeLabel",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            all.take(3).forEachIndexed { i, c ->
+                val host = c.name.substringAfter('@', "here")
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                    Text(
+                        host,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (i == 0) FontWeight.SemiBold else null,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(0.42f),
+                    )
+                    Box(
+                        Modifier
+                            .weight(0.38f)
+                            .height(5.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(((c.activeUsers ?: 0).toFloat() / busiest).coerceIn(0.03f, 1f))
+                                .height(5.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = if (i == 0) 1f else 0.55f)),
+                        )
+                    }
+                    Text(
+                        compact(c.activeUsers ?: 0),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                        modifier = Modifier.weight(0.2f),
+                    )
+                }
+            }
+            if (all.size > 3) {
+                Text("and ${all.size - 3} more", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            }
+            if (onMergeAll != null) {
+                FilledTonalButton(
+                    onClick = onMergeAll,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(40.dp),
+                ) {
+                    Icon(LurkIcons.Merge, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Join all ${all.size} as one feed")
+                }
             }
         }
     }
@@ -466,6 +600,8 @@ private fun CommunityCard(
     skipStamp: Float,
     onClick: () -> Unit,
     modifier: Modifier,
+    elsewhere: String? = null,
+    onMergeAll: (() -> Unit)? = null,
 ) {
     val naming = LocalNaming.current
     val showNsfw = LocalShowNsfw.current
@@ -530,15 +666,17 @@ private fun CommunityCard(
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     }
+                    elsewhere?.let { JoinedElsewhere(it, Modifier.padding(top = 10.dp)) }
                     if (info.description.isNotBlank()) {
                         Text(
                             info.description,
                             style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 3,
+                            maxLines = if (info.copies.isEmpty()) 3 else 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 10.dp),
                         )
                     }
+                    if (info.copies.isNotEmpty()) Copies(info, activeLabel, onMergeAll, Modifier.padding(top = 12.dp))
                     Text(
                         peekLabel,
                         style = MaterialTheme.typography.labelLarge,
