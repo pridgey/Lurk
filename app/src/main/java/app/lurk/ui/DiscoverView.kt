@@ -577,7 +577,8 @@ private fun CommunityIcon(info: CommunityInfo, size: Dp, modifier: Modifier = Mo
     ) {
         Box(Modifier.fillMaxSize().clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerLow)) {
             Avatar(LocalNaming.current.label(info.name), size - 8.dp)
-            if (info.icon != null) {
+            // An NSFW icon stays covered unless the account shows NSFW.
+            if (info.icon != null && (!info.over18 || LocalShowNsfw.current)) {
                 AsyncImage(
                     model = info.icon,
                     contentDescription = null,

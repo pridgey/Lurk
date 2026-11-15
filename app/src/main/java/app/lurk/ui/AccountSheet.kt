@@ -143,7 +143,7 @@ internal fun AccountSheetContent(
             SwitchRow(
                 icon = LurkIcons.Eye,
                 title = "Show NSFW without tapping",
-                subtitle = "Spoilers still stay hidden",
+                subtitle = "Also deals NSFW communities in Discover. Spoilers stay hidden",
                 checked = current.showNsfw,
                 onChange = actions.setNsfw,
             )

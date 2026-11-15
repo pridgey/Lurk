@@ -227,6 +227,7 @@ class DiscoverScreen(
         }
     }
 
+    /** Whether browsing deals [c]: NSFW ones only for accounts that opted in. */
     private fun allowed(c: CommunityInfo) = !c.over18 || showNsfw()
 
     // --- Search ---
@@ -315,7 +316,8 @@ class DiscoverScreen(
                 if (gen != searchGeneration) return@launch
                 if (fresh) results.clear()
                 val have = results.mapTo(HashSet()) { it.name.lowercase() }
-                results.addAll(page.communities.filter { have.add(it.name.lowercase()) && allowed(it) })
+                // NSFW ones too: searching asks for them, and their icons stay covered.
+                results.addAll(page.communities.filter { have.add(it.name.lowercase()) })
                 searched = q
                 searchAfter = page.after
                 searchEnded = page.after == null
