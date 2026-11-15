@@ -407,35 +407,77 @@ class LemmyService(
     }
 
     /**
-     * Searches the community index when it's at hand (names and titles first, then
-     * descriptions, biggest first), else this instance. Also this instance when the index
-     * has nothing, since it may know communities the index doesn't.
+     * Searches the community index when it's at hand (exact names first, then names and
+     * titles, then descriptions, biggest first), else this instance. The first page also
+     * asks this instance and adds what the index lacks: it knows communities the crawl
+     * missed (other software, uncrawled or new instances). An address ("linux@lemmy.ml",
+     * "!linux@lemmy.ml") looks that one community up, fetching it here if need be.
      */
     override suspend fun searchCommunities(query: String, cursor: String?): CommunityPage {
+        val q = query.trim().removePrefix("!")
+        if (cursor == null && '@' in q && ' ' !in q) {
+            lookUp(q)?.let { return CommunityPage(listOf(it), null) }
+        }
         if (index != null && (cursor == null || cursor.startsWith(INDEX))) {
             val all = index.cached()
             if (all != null) {
-                val terms = query.lowercase().split(' ').filter { it.isNotBlank() }
+                val lower = q.lowercase()
+                val terms = lower.split(' ').filter { it.isNotBlank() }
                 val reachable = reachable()
                 fun has(text: String) = terms.all { it in text }
                 val found = withContext(Dispatchers.Default) {
+                    val exact = ArrayList<IndexedCommunity>()
                     val named = ArrayList<IndexedCommunity>()
                     val described = ArrayList<IndexedCommunity>()
                     for (c in all) {
                         if (!reachable(c.host)) continue
                         when {
+                            c.name.equals(lower, ignoreCase = true) -> exact.add(c)
                             has((c.name + " " + c.title.orEmpty()).lowercase()) -> named.add(c)
                             has(c.description.lowercase()) -> described.add(c)
                         }
                     }
-                    named.sortedByDescending { it.subscribers } + described.sortedByDescending { it.subscribers }
+                    exact.sortedByDescending { it.subscribers } +
+                        named.sortedByDescending { it.subscribers } +
+                        described.sortedByDescending { it.subscribers }
                 }
-                if (found.isNotEmpty() || cursor != null) return indexPage(found, cursor, SEARCH_PAGE)
+                if (cursor != null) return indexPage(found, cursor, SEARCH_PAGE)
+                val local = try {
+                    searchInstance(q, null).communities
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (found.isEmpty()) throw e
+                    emptyList() // the index still has something to show
+                }
+                val known = found.mapTo(HashSet()) { fromIndex(it).name.lowercase() }
+                val extra = local.filter { it.name.lowercase() !in known }
+                if (found.isEmpty()) return CommunityPage(extra, null)
+                val first = indexPage(found, null, SEARCH_PAGE)
+                val (extraExact, extraRest) = extra.partition { it.name.substringBefore('@').equals(lower, ignoreCase = true) }
+                val (pageExact, pageRest) = first.communities.partition { it.name.substringBefore('@').equals(lower, ignoreCase = true) }
+                return CommunityPage(pageExact + extraExact + pageRest + extraRest, first.after)
             } else if (cursor != null) {
                 return CommunityPage(emptyList(), null)
             }
         }
-        return searchInstance(query, cursor)
+        return searchInstance(q, cursor)
+    }
+
+    /** One community by its address, as this instance knows it, fetching it here if it hasn't seen it. */
+    private suspend fun lookUp(address: String): CommunityInfo? = try {
+        val found = try {
+            client.get("/community", mapOf("name" to address))
+        } catch (e: LemmyError) {
+            if (e.code != "couldnt_find_community") throw e
+            client.get("/resolve_object", mapOf("q" to "!$address"))
+            client.get("/community", mapOf("name" to address))
+        }
+        found.optJSONObject("community_view")?.let(LemmyParse::communityInfo)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null // fall back to searching for the text
     }
 
     /** Every community the instance knows whose name or title matches; TopAll ranks by members. */
