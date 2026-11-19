@@ -102,6 +102,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import app.lurk.data.Account
+import app.lurk.data.Sloota
 import app.lurk.data.AccountSession
 import app.lurk.data.AccountStore
 import app.lurk.data.DebugLog
@@ -763,7 +764,10 @@ private fun AccountContent(
     session.playingFile?.let { stream ->
         VideoPlayer(
             stream,
-            onClose = { session.playingFile = null },
+            onClose = {
+                session.playingFile = null
+                Sloota.stoppingPoint("video_closed")
+            },
             onOpenOnWeb = {
                 session.playingFile = null
                 stream.mp4Url?.let { openExternal(context, Uri.parse(it)) }
@@ -775,7 +779,10 @@ private fun AccountContent(
         VideoSheet(
             url,
             isolateScript = session.scripts.isolate,
-            onClose = { session.sheetUrl = null },
+            onClose = {
+                session.sheetUrl = null
+                Sloota.stoppingPoint("video_closed")
+            },
             onOpenOutside = { uri ->
                 session.sheetUrl = null
                 openExternal(context, uri)
@@ -791,7 +798,10 @@ private fun AccountContent(
             stream != null -> VideoPlayer(
                 stream,
                 startMs = session.playingVideoStartMs,
-                onClose = { session.playingVideo = null },
+                onClose = {
+                    session.playingVideo = null
+                    Sloota.stoppingPoint("video_closed")
+                },
                 onOpenOnWeb = {
                     session.playingVideo = null
                     session.openWeb(links.thread(post.threadRef))
@@ -800,7 +810,10 @@ private fun AccountContent(
             embed != null -> EmbedPlayer(
                 embed,
                 siteName = embed.provider ?: post.domain.removePrefix("www."),
-                onClose = { session.playingVideo = null },
+                onClose = {
+                    session.playingVideo = null
+                    Sloota.stoppingPoint("video_closed")
+                },
                 onOpenSite = {
                     session.playingVideo = null
                     openExternal(context, Uri.parse(post.url))

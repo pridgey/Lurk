@@ -425,6 +425,8 @@ class AccountSession(
     fun pop(): Boolean {
         if (stack.size <= 1) return false
         close(stack.removeAt(stack.lastIndex))
+        // Backing out of a post, reader view or page is a natural place to stop.
+        Sloota.stoppingPoint("back")
         return true
     }
 

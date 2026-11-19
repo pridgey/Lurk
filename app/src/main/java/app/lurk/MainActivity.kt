@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        app.lurk.data.Sloota.init(this)
         enableEdgeToEdge()
         // Animated GIFs in posts and the image viewer.
         Coil.setImageLoader(

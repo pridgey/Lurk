@@ -5,6 +5,12 @@
     <!-- In-app updates from the repo's GitHub releases (⋮ > Check for updates). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Sloota (our app-limit app) hears about stopping points; see data/Sloota.kt. -->
+    <queries>
+        <package android:name="dev.pridgey.sloota" />
+        <package android:name="dev.pridgey.sloota.debug" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

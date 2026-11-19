@@ -127,6 +127,8 @@ class DiscoverScreen(
     fun swipe(join: Boolean) {
         val top = deck.firstOrNull() ?: return
         deck.removeAt(0)
+        // Done with one card, before the next one draws you in.
+        Sloota.stoppingPoint("discover_card")
         seen.add(top.name)
         top.copies.forEach { seen.add(it.name) }
         if (join) {
