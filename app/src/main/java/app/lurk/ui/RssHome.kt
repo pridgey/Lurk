@@ -41,9 +41,11 @@ fun RssSignInView(onSignIn: () -> Unit) {
 /** Over an RSS account's feed: how fresh its posts are, and anything off about that. */
 @Composable
 fun RssFeedHeader(screen: FeedScreen) {
-    val fetched = screen.fetchedAt ?: return
+    val fetched = screen.fetchedAt
+    // A collected account can have a notice before its first posts arrive.
+    if (fetched == null && screen.notice == null) return
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
+        if (fetched != null) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.tertiary))
             Text(
                 "Updated " + ago(fetched / 1000).let { if (it == "now") "just now" else "$it ago" } + " · comments open in Chrome",

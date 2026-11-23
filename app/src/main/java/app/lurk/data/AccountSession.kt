@@ -74,8 +74,13 @@ class AccountSession(
                 onLearned = { names -> store.update(accountId) { it.copy(communities = names) } },
                 onLinkRejected = { onLemmyTokenRejected() },
             )
+            ServiceKind.RedditLocal -> RedditLocalService(
+                context, accountId,
+                followed = { store.find(accountId)?.communities.orEmpty() },
+            )
         }
     }
+    private val appContext = context.applicationContext
     val links get() = service.links
     val actions = Actions(service, scope, signedIn = { account?.username != null }, onMessage = onMessage)
     val browser = BrowserController(
@@ -254,7 +259,7 @@ class AccountSession(
 
     /** A community as the same key whichever account names it: "reddit:pics", "lemmy:linux@lemmy.ml". */
     private fun canonical(a: Account, name: String): String? = when (a.kind) {
-        ServiceKind.Reddit, ServiceKind.RedditRss -> "reddit:" + name.lowercase()
+        ServiceKind.Reddit, ServiceKind.RedditRss, ServiceKind.RedditLocal -> "reddit:" + name.lowercase()
         ServiceKind.Lemmy -> "lemmy:" + (if ('@' in name) name else "$name@${a.instance}").lowercase()
         ServiceKind.Bluesky -> null
     }
@@ -301,7 +306,10 @@ class AccountSession(
     }
 
     /** An RSS account: posts only, with comments, users and other pages on Reddit in Chrome. */
-    val isRss: Boolean get() = service.kind == ServiceKind.RedditRss
+    val isRss: Boolean get() = service.kind == ServiceKind.RedditRss || isCollected
+
+    /** The collected account: its subreddit list is on the phone, so it can follow and leave them. */
+    val isCollected: Boolean get() = service.kind == ServiceKind.RedditLocal
 
     /** Posts, users and other web pages open in Chrome: Reddit blocks Lurk's browser, or this is an RSS account. */
     val webInChrome: Boolean get() = inChrome || isRss
@@ -389,7 +397,7 @@ class AccountSession(
 
     /** Whether the signed-in account can subscribe to [community]'s feed (not Home, All, ...). */
     fun canSubscribe(community: String?): Boolean =
-        community != null && account?.username != null && !service.isMixed(community) && !isRss && !isMerged(community)
+        community != null && account?.username != null && !service.isMixed(community) && (!isRss || isCollected) && !isMerged(community)
 
     fun isSubscribed(community: String): Boolean =
         account?.communities?.any { it.equals(community, ignoreCase = true) } == true
@@ -600,9 +608,11 @@ class AccountSession(
         (service as? LemmyService)?.let { lemmy -> scope.launch { runCatching { lemmy.logOut() } } }
         (service as? BlueskyService)?.let { bluesky -> scope.launch { runCatching { bluesky.logOut() } } }
         (service as? RedditRssService)?.logOut() // the link reads this account's front page
+        (service as? RedditLocalService)?.logOut()
         if (store.multiProfile) {
             store.remove(accountId) // switches the UI away, which destroys this session
             WebProfiles.wipe(profile)
+            if (service is RedditLocalService) LocalFeedSync.update(appContext)
         } else {
             WebProfiles.wipe(null)
             store.update(accountId) { it.copy(username = null, knownAs = null, communities = emptyList(), token = null, refreshToken = null) }

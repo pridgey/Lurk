@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.lurk.data.Account
+import app.lurk.data.ServiceKind
 import kotlinx.coroutines.launch
 
 /** What the account sheet can do. Each closes the sheet first. */
@@ -73,6 +74,10 @@ class AccountActions(
     /** Leave posts already seen out of this account's feeds. */
     val setHideSeen: (Boolean) -> Unit = {},
     val openSettings: () -> Unit = {},
+    /** Adds the collected account, or switches to it if it's there. */
+    val addCollected: () -> Unit = {},
+    /** Edits the collected account's subreddits. */
+    val editCollected: () -> Unit = {},
 )
 
 /**
@@ -148,6 +153,16 @@ internal fun AccountSheetContent(
                 trailing = { Icon(LurkIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
                 onClick = { pick(actions.openSettings) },
             )
+            if (current.kind == ServiceKind.RedditLocal) {
+                GroupDivider()
+                GroupRow(
+                    title = "Collected subreddits",
+                    subtitle = "${current.communities.size} on this phone",
+                    leading = { IconTile(LurkIcons.Rss) },
+                    trailing = { Icon(LurkIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
+                    onClick = { pick(actions.editCollected) },
+                )
+            }
         }
 
         if (others.isNotEmpty()) {
@@ -168,6 +183,8 @@ internal fun AccountSheetContent(
             SectionLabel("Add account")
             RowGroup {
                 AddRow("Reddit", "Front page and subreddits, from RSS", LurkIcons.Rss) { pick(actions.addRedditRss) }
+                GroupDivider()
+                AddRow("Reddit (collected)", "No sign-in, saved over mobile data", LurkIcons.Rss) { pick(actions.addCollected) }
                 if (standardReddit) {
                     GroupDivider()
                     AddRow("Reddit (website)", "Signed in on Reddit's site", LurkIcons.Globe) { pick(actions.addReddit) }

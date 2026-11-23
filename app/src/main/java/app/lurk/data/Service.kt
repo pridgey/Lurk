@@ -15,6 +15,8 @@ enum class ServiceKind {
     Reddit, Lemmy, Bluesky,
     /** Reddit read through its RSS feeds: the front page's private feed, and each subreddit's. */
     RedditRss,
+    /** Reddit with no sign-in: subreddits listed on the phone, collected in the background. */
+    RedditLocal,
 }
 
 /** A sort order as a site names it: [key] is sent to the site, [label] is shown. */

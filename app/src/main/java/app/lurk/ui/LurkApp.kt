@@ -113,6 +113,9 @@ import app.lurk.data.FixedFeed
 import app.lurk.data.Naming
 import app.lurk.data.RssProbe
 import app.lurk.data.RedditRssService
+import app.lurk.data.COLLECTED_NAME
+import app.lurk.data.CollectedPosts
+import app.lurk.data.LocalFeedSync
 import app.lurk.data.ServiceKind
 import app.lurk.data.RedditAccess
 import app.lurk.data.ThreadScreen
@@ -172,7 +175,14 @@ fun LurkApp(store: AccountStore) {
         LockScreen(
             onLeave = elsewhere?.let { id -> { store.setActive(id) } },
             onUnlock = { pin -> store.unlock(activeId, pin) },
-            onForget = { store.forget(activeId) },
+            onForget = {
+                val collected = active?.kind == ServiceKind.RedditLocal
+                store.forget(activeId)
+                if (collected) {
+                    CollectedPosts.get(context, activeId).clear()
+                    LocalFeedSync.update(context.applicationContext)
+                }
+            },
         )
         return
     }
@@ -231,6 +241,7 @@ private fun AccountContent(
     var rssSetup by remember { mutableStateOf(false) }
     var tokenSetup by remember { mutableStateOf(false) }
     var addingRss by remember { mutableStateOf(false) }
+    var collectedOpen by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     /** The layout sheet: for the feed on screen, or (true) the default for every feed. */
     var layoutFor by remember { mutableStateOf<Boolean?>(null) }
@@ -450,6 +461,11 @@ private fun AccountContent(
                     }
                 },
                 addRedditRss = { addingRss = true },
+                addCollected = {
+                    val existing = store.accounts.firstOrNull { it.kind == ServiceKind.RedditLocal }
+                    if (existing != null) store.setActive(existing.id) else collectedOpen = true
+                },
+                editCollected = { collectedOpen = true },
                 addLemmy = { addingLemmy = true },
                 addBluesky = { addingBluesky = true },
                 setNsfw = { on -> store.update(account.id) { it.copy(showNsfw = on) } },
@@ -821,6 +837,31 @@ private fun AccountContent(
                 onExternalLink = { uri -> openExternal(context, uri) },
             )
         }
+    }
+
+    if (collectedOpen) {
+        val editing = account.kind == ServiceKind.RedditLocal
+        CollectedDialog(
+            subreddits = if (editing) account.communities else emptyList(),
+            cellularOnWifi = LocalFeedSync.cellularOnWifi(context),
+            onSave = { subs, onWifi ->
+                collectedOpen = false
+                val sorted = subs.sortedBy { it.lowercase() }
+                if (editing) {
+                    store.update(account.id) { it.copy(communities = sorted) }
+                    session.reset(session.feed(null))
+                } else {
+                    val added = store.add(ServiceKind.RedditLocal) {
+                        it.copy(username = COLLECTED_NAME, knownAs = COLLECTED_NAME, communities = sorted)
+                    }
+                    store.setActive(added.id)
+                }
+                LocalFeedSync.setCellularOnWifi(context, onWifi)
+                LocalFeedSync.update(context.applicationContext)
+                LocalFeedSync.collectSoon(context)
+            },
+            onCancel = { collectedOpen = false },
+        )
     }
 
     if (addingRss) {

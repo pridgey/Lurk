@@ -69,6 +69,7 @@ data class Account(
             ServiceKind.Lemmy -> instance ?: "Lemmy"
             ServiceKind.Bluesky -> "Bluesky"
             ServiceKind.RedditRss -> "Reddit (RSS)"
+            ServiceKind.RedditLocal -> "Reddit (collected)"
         }
 
     /** How the account is named in menus: "u/name", "name@lemmy.world". Kept while [expired]. */
@@ -78,6 +79,7 @@ data class Account(
                 ServiceKind.Reddit, ServiceKind.RedditRss -> "u/$name"
                 ServiceKind.Lemmy -> "$name@$instance"
                 ServiceKind.Bluesky -> "@$name"
+                ServiceKind.RedditLocal -> name
             }
         }
 }

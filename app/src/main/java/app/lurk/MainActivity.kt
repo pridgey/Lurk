@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
                 .build(),
         )
         store = AccountStore(applicationContext, multiProfile = WebProfiles.supported)
+        app.lurk.data.LocalFeedSync.update(applicationContext)
         setContent {
             LurkTheme { LurkApp(store) }
         }
