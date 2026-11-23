@@ -34,12 +34,14 @@ class CollectedPosts private constructor(private val file: AtomicFile) {
     @Synchronized
     fun posts(): List<Post> = loaded().map { it.post }
 
-    /** Adds [incoming], refreshing posts already kept, and drops what's past its time. */
+    /** Adds [incoming], refreshing posts already kept, and drops what's past its time. Returns how many were new. */
     @Synchronized
-    fun add(incoming: List<Post>, now: Long = System.currentTimeMillis()) {
+    fun add(incoming: List<Post>, now: Long = System.currentTimeMillis()): Int {
+        val known = loaded().mapTo(HashSet()) { it.post.name }
         val merged = merge(loaded(), incoming, now)
         entries = merged
         write(merged)
+        return incoming.distinctBy { it.name }.count { it.name !in known }
     }
 
     /** Posts per subreddit (lowercase) from the last day: how busy each one is. */

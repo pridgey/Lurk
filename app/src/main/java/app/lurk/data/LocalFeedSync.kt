@@ -16,7 +16,11 @@ import androidx.work.WorkerParameters
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.TimeUnit
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -27,7 +31,14 @@ import org.json.JSONArray
 /** Android wakes this now and then; [LocalFeedSync] decides whether anything is due. */
 class LocalFeedWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        LocalFeedSync.run(applicationContext)
+        try {
+            LocalFeedSync.run(applicationContext)
+        } catch (e: CancellationException) {
+            CollectionLog.add(applicationContext, "Android stopped this run before it finished")
+            throw e
+        } catch (e: Exception) {
+            CollectionLog.add(applicationContext, "Run failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
         return Result.success()
     }
 }
@@ -68,6 +79,7 @@ object LocalFeedSync {
             if (collectedAccount(context) == null) {
                 work.cancelUniqueWork(WORK)
                 prefs(context).edit().clear().apply()
+                CollectionLog.clear(context)
                 return
             }
             val request = PeriodicWorkRequestBuilder<LocalFeedWorker>(WAKE_MINUTES, TimeUnit.MINUTES)
@@ -100,14 +112,26 @@ object LocalFeedSync {
 
     suspend fun run(context: Context) {
         val account = collectedAccount(context) ?: return
-        if (account.second.isEmpty()) return
+        if (account.second.isEmpty()) {
+            CollectionLog.add(context, "Woke up: no subreddits to collect")
+            return
+        }
         val p = prefs(context)
         val now = System.currentTimeMillis()
-        if (now < p.getLong(KEY_NEXT, 0)) return
+        val nextAt = p.getLong(KEY_NEXT, 0)
+        if (now < nextAt) {
+            CollectionLog.add(context, "Woke up: not due until ${clock(nextAt)}")
+            return
+        }
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
-        if (!cellularOnWifi(context) && !isOnCellular(cm)) return
-        onCellular(cm) { network -> collect(context, account.first, account.second, network) }
+        if (!cellularOnWifi(context) && !isOnCellular(cm)) {
+            CollectionLog.add(context, "Woke up: skipped, not on mobile data")
+            return
+        }
+        onCellular(context, cm) { network -> collect(context, account.first, account.second, network) }
     }
+
+    private fun clock(at: Long): String = SimpleDateFormat("EEE HH:mm", Locale.getDefault()).format(Date(at))
 
     private fun isOnCellular(cm: ConnectivityManager): Boolean {
         val caps = cm.activeNetwork?.let(cm::getNetworkCapabilities) ?: return false
@@ -116,7 +140,7 @@ object LocalFeedSync {
     }
 
     /** Runs [block] on the phone's mobile network, even with wifi up. Skips it when there's none. */
-    private suspend fun onCellular(cm: ConnectivityManager, block: suspend (Network) -> Unit) {
+    private suspend fun onCellular(context: Context, cm: ConnectivityManager, block: suspend (Network) -> Unit) {
         val found = CompletableDeferred<Network?>()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -133,7 +157,9 @@ object LocalFeedSync {
             .build()
         cm.requestNetwork(request, callback, NETWORK_WAIT_MS.toInt())
         try {
-            withTimeoutOrNull(NETWORK_WAIT_MS + 1_000) { found.await() }?.let { block(it) }
+            val network = withTimeoutOrNull(NETWORK_WAIT_MS + 1_000) { found.await() }
+            if (network != null) block(network)
+            else CollectionLog.add(context, "Woke up: skipped, Android couldn't provide a mobile network")
         } finally {
             runCatching { cm.unregisterNetworkCallback(callback) }
         }
@@ -145,18 +171,24 @@ object LocalFeedSync {
         val all = batches(subs, withContext(Dispatchers.IO) { store.recentCounts() })
         var turn = p.getInt(KEY_TURN, 0)
         val runs = minOf(all.size, MAX_BATCHES_PER_RUN)
+        var added = 0
+        CollectionLog.add(context, "Collecting over mobile data: $runs of ${all.size} batches")
         for (i in 0 until runs) {
             if (i > 0) delay(Random.nextLong(MIN_REQUEST_GAP_MS, MAX_REQUEST_GAP_MS))
             val batch = all[turn.mod(all.size)]
+            val label = batch.joinToString(", ") { "r/$it" }
             val result = withContext(Dispatchers.IO) { fetch(context, network, batch) }
             when (result.status) {
                 200 -> {
                     val posts = runCatching { RedditRss.parse(result.body) }.getOrNull()
                     if (posts == null) {
+                        CollectionLog.add(context, "$label: HTTP 200, but the feed couldn't be read")
                         finish(context, problem = "Reddit sent a feed Lurk couldn't read.")
                         return
                     }
-                    withContext(Dispatchers.IO) { store.add(posts) }
+                    val fresh = withContext(Dispatchers.IO) { store.add(posts) }
+                    added += fresh
+                    CollectionLog.add(context, "$label: HTTP 200, ${posts.size} posts, $fresh new")
                     turn = (turn + 1).mod(all.size)
                     p.edit().putInt(KEY_TURN, turn).putLong(KEY_LAST, System.currentTimeMillis()).apply()
                 }
@@ -168,26 +200,36 @@ object LocalFeedSync {
                         .putLong(KEY_NEXT, System.currentTimeMillis() + wait)
                         .putString(KEY_PROBLEM, "Reddit turned Lurk away (${result.status}). Trying again in about ${wait / 3_600_000} h.")
                         .apply()
+                    CollectionLog.add(
+                        context,
+                        "$label: HTTP ${result.status}, refused. Refusal $fails in a row, waiting until ${clock(System.currentTimeMillis() + wait)}",
+                    )
                     return
                 }
                 else -> {
-                    finish(context, problem = "Couldn't collect new posts last time (${if (result.status == 0) "no connection" else "error ${result.status}"}).")
+                    val what = if (result.status == 0) "failed: ${result.error ?: "no connection"}" else "HTTP ${result.status}"
+                    val next = finish(context, problem = "Couldn't collect new posts last time (${if (result.status == 0) "no connection" else "error ${result.status}"}).")
+                    CollectionLog.add(context, "$label: $what. Next fetch after ${clock(next)}")
                     return
                 }
             }
         }
         p.edit().putInt(KEY_FAILS, 0).apply()
-        finish(context, problem = null)
+        val next = finish(context, problem = null)
+        CollectionLog.add(context, "Done: $added new posts. Next fetch after ${clock(next)}")
     }
 
-    private fun finish(context: Context, problem: String?) {
+    /** Sets when the next fetch may go out, and returns it. */
+    private fun finish(context: Context, problem: String?): Long {
+        val next = System.currentTimeMillis() + Random.nextLong(MIN_GAP_MS, MAX_GAP_MS)
         prefs(context).edit()
-            .putLong(KEY_NEXT, System.currentTimeMillis() + Random.nextLong(MIN_GAP_MS, MAX_GAP_MS))
+            .putLong(KEY_NEXT, next)
             .putString(KEY_PROBLEM, problem)
             .apply()
+        return next
     }
 
-    private class Fetched(val status: Int, val body: String, val retryAfterMs: Long?)
+    private class Fetched(val status: Int, val body: String, val retryAfterMs: Long?, val error: String? = null)
 
     private fun fetch(context: Context, network: Network, batch: List<String>): Fetched {
         val url = URL("https://www.reddit.com/r/${Uri.encode(batch.joinToString("+"), "+")}/.rss?limit=100")
@@ -206,7 +248,7 @@ object LocalFeedSync {
                 conn.disconnect()
             }
         } catch (e: Exception) {
-            Fetched(0, "", null)
+            Fetched(0, "", null, "${e.javaClass.simpleName}: ${e.message}")
         }
     }
 

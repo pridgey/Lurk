@@ -242,6 +242,7 @@ private fun AccountContent(
     var tokenSetup by remember { mutableStateOf(false) }
     var addingRss by remember { mutableStateOf(false) }
     var collectedOpen by remember { mutableStateOf(false) }
+    var collectionLogOpen by remember { mutableStateOf(false) }
     var accountsOpen by remember { mutableStateOf(false) }
     /** The layout sheet: for the feed on screen, or (true) the default for every feed. */
     var layoutFor by remember { mutableStateOf<Boolean?>(null) }
@@ -466,6 +467,7 @@ private fun AccountContent(
                     if (existing != null) store.setActive(existing.id) else collectedOpen = true
                 },
                 editCollected = { collectedOpen = true },
+                openCollectionLog = { collectionLogOpen = true },
                 addLemmy = { addingLemmy = true },
                 addBluesky = { addingBluesky = true },
                 setNsfw = { on -> store.update(account.id) { it.copy(showNsfw = on) } },
@@ -838,6 +840,8 @@ private fun AccountContent(
             )
         }
     }
+
+    if (collectionLogOpen) CollectionLogDialog(onClose = { collectionLogOpen = false })
 
     if (collectedOpen) {
         val editing = account.kind == ServiceKind.RedditLocal

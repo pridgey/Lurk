@@ -56,6 +56,18 @@ class CollectedFeedTest {
     }
 
     @Test
+    fun logCollapsesRepeatsAndKeepsTheNewest() {
+        var log = CollectionLog.append(emptyList(), "skipped", 1)
+        log = CollectionLog.append(log, "skipped", 2)
+        assertEquals(listOf(CollectionLogEntry(2, "skipped", 2)), log)
+        log = CollectionLog.append(log, "fetched", 3)
+        assertEquals(2, log.size)
+        repeat(CollectionLog.MAX_ENTRIES + 5) { log = CollectionLog.append(log, "line $it", 10L + it) }
+        assertEquals(CollectionLog.MAX_ENTRIES, log.size)
+        assertEquals("line ${CollectionLog.MAX_ENTRIES + 4}", log.last().message)
+    }
+
+    @Test
     fun backoffDoublesCapsAndHonorsRetryAfter() {
         val hour = 60 * 60_000L
         assertEquals(2 * hour, LocalFeedSync.backoffMs(1, null))

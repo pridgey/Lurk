@@ -78,6 +78,8 @@ class AccountActions(
     val addCollected: () -> Unit = {},
     /** Edits the collected account's subreddits. */
     val editCollected: () -> Unit = {},
+    /** Shows what background collection has been doing. */
+    val openCollectionLog: () -> Unit = {},
 )
 
 /**
@@ -161,6 +163,14 @@ internal fun AccountSheetContent(
                     leading = { IconTile(LurkIcons.Rss) },
                     trailing = { Icon(LurkIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
                     onClick = { pick(actions.editCollected) },
+                )
+                GroupDivider()
+                GroupRow(
+                    title = "Collection log",
+                    subtitle = "Every check, fetch and refusal",
+                    leading = { IconTile(LurkIcons.Info) },
+                    trailing = { Icon(LurkIcons.Chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
+                    onClick = { pick(actions.openCollectionLog) },
                 )
             }
         }

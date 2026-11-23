@@ -4,7 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -13,14 +17,78 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import app.lurk.data.CollectionLog
 import app.lurk.data.parseSubreddits
+import kotlinx.coroutines.delay
+
+/** What background collection has been doing, newest first. Updates while it's open. */
+@Composable
+fun CollectionLogDialog(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var entries by remember { mutableStateOf(CollectionLog.read(context).asReversed()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(3_000)
+            entries = CollectionLog.read(context).asReversed()
+        }
+    }
+
+    AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        onDismissRequest = onClose,
+        title = { Text("Collection log") },
+        text = {
+            if (entries.isEmpty()) {
+                Text(
+                    "Nothing yet. Android runs the first check within about 30 minutes of adding the account, sometimes later.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                SelectionContainer {
+                    LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(entries) { entry ->
+                            Text(
+                                CollectionLog.line(entry),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = {
+                        CollectionLog.clear(context)
+                        entries = emptyList()
+                    },
+                    enabled = entries.isNotEmpty(),
+                ) { Text("Clear") }
+                TextButton(
+                    onClick = { clipboard.setText(AnnotatedString(entries.joinToString("\n", transform = CollectionLog::line))) },
+                    enabled = entries.isNotEmpty(),
+                ) { Text("Copy") }
+            }
+        },
+    )
+}
 
 /** Picks the subreddits the collected account gathers, and when it may use mobile data. */
 @Composable
